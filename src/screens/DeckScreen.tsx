@@ -1,0 +1,184 @@
+import { useEffect, useMemo, useState } from 'react'
+import { KanjiDetail } from '../components/KanjiDetail'
+import { getAllCards, getCard, getSettings, markKnown, type Settings } from '../lib/db'
+import { DAY_MS, type SrsCard } from '../lib/srs'
+import { getKanji } from '../lib/kanji'
+
+type Filter = 'all' | 'new' | 'learning' | 'due' | 'known'
+type CardStatus = Exclude<Filter, 'all'> | 'scheduled'
+
+interface Row {
+  card: SrsCard
+  status: CardStatus
+}
+
+interface DeckScreenProps {
+  onExit: () => void
+}
+
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'new', label: 'New' },
+  { value: 'learning', label: 'Learning' },
+  { value: 'due', label: 'Due' },
+  { value: 'known', label: 'Known' },
+]
+
+const CELL_COLOR: Record<CardStatus, string> = {
+  new: 'text-slate-400',
+  learning: 'text-amber-600',
+  due: 'text-red-600',
+  scheduled: 'text-slate-900',
+  known: 'text-green-700',
+}
+
+export function DeckScreen({ onExit }: DeckScreenProps) {
+  const [cards, setCards] = useState<SrsCard[]>([])
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [filter, setFilter] = useState<Filter>('all')
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<SrsCard | null>(null)
+  const [now, setNow] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([getAllCards(), getSettings()]).then(([cardData, settingsData]) => {
+      if (cancelled) return
+      setCards(cardData)
+      setSettings(settingsData)
+      setNow(Date.now())
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const rows = useMemo<Row[]>(() => {
+    if (!settings || now === 0) return []
+    const endOfToday = startOfDay(now) + DAY_MS
+    return cards.map((card) => ({ card, status: cardStatus(card, settings, endOfToday) }))
+  }, [cards, settings, now])
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return rows.filter((row) => {
+      if (filter !== 'all' && row.status !== filter) return false
+      if (!needle) return true
+      const entry = getKanji(row.card.kanji)
+      return (
+        row.card.kanji.includes(needle) ||
+        entry.meaning.toLowerCase().includes(needle) ||
+        entry.kun.some((k) => k.toLowerCase().includes(needle)) ||
+        entry.on.some((o) => o.toLowerCase().includes(needle))
+      )
+    })
+  }, [rows, filter, query])
+
+  const toggleKnown = async (kanji: string, known: boolean) => {
+    await markKnown(kanji, known)
+    const updated = (await getCard(kanji)) ?? null
+    setSelected(updated)
+    setCards((prev) => prev.map((c) => (c.kanji === kanji ? (updated ?? c) : c)))
+  }
+
+  return (
+    <div className="flex min-h-svh flex-col">
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h1 className="text-lg font-semibold">Deck</h1>
+            <div className="flex items-center gap-3 text-sm text-slate-600">
+              <span className="tabular-nums" data-testid="deck-count">
+                {visible.length} / {rows.length}
+              </span>
+              <button
+                type="button"
+                onClick={onExit}
+                className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95"
+              >
+                Exit
+              </button>
+            </div>
+          </div>
+
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search kanji, meaning or reading…"
+            aria-label="Search kanji"
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
+          />
+
+          <div className="flex flex-wrap gap-2">
+            {FILTERS.map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setFilter(value)}
+                className={`min-h-11 rounded-full px-4 text-sm font-medium transition active:scale-95 ${
+                  filter === value
+                    ? 'bg-slate-800 text-white shadow-sm'
+                    : 'border border-slate-300 bg-white text-slate-600'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto w-full max-w-3xl flex-1 p-4">
+        {cards.length === 0 ? (
+          <p className="py-12 text-center text-slate-500">Loading…</p>
+        ) : visible.length === 0 ? (
+          <p className="py-12 text-center text-slate-500">No kanji match this filter.</p>
+        ) : (
+          <div className="grid grid-cols-5 gap-2 sm:grid-cols-7 md:grid-cols-10 lg:grid-cols-12">
+            {visible.map(({ card, status }) => (
+              <button
+                key={card.kanji}
+                type="button"
+                onClick={() => setSelected(card)}
+                aria-label={`${card.kanji} — ${status}`}
+                className={`flex aspect-square min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-2xl font-semibold shadow-sm transition active:scale-90 sm:text-3xl ${CELL_COLOR[status]}`}
+              >
+                {card.kanji}
+              </button>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {selected && settings && (
+        <KanjiDetail
+          entry={getKanji(selected.kanji)}
+          card={selected}
+          settings={settings}
+          onToggleKnown={(known) => toggleKnown(selected.kanji, known)}
+          onClose={() => setSelected(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function cardStatus(
+  card: SrsCard,
+  settings: Settings,
+  endOfToday: number,
+): CardStatus {
+  if (card.known || (card.state === 'review' && card.interval >= settings.knownThresholdDays)) {
+    return 'known'
+  }
+  if (card.state === 'new') return 'new'
+  if (card.state === 'learning' || card.state === 'relearning') return 'learning'
+  return card.due <= endOfToday ? 'due' : 'scheduled'
+}
+
+function startOfDay(now: number): number {
+  const d = new Date(now)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
