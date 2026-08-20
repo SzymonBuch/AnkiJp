@@ -55,7 +55,7 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
             <button
               type="button"
               onClick={session.finish}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 font-medium text-slate-600 transition active:scale-95"
+              className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95"
             >
               End session
             </button>

@@ -15,4 +15,18 @@ body,
 
 body {
   margin: 0;
+  overscroll-behavior-y: none;
+}
+
+button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Respect iPhone notch / gesture bar when installed as a PWA. */
+@supports (padding: env(safe-area-inset-top)) {
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
 }

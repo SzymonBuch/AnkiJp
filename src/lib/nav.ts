@@ -1,0 +1,1 @@
+export type Screen = 'home' | 'study' | 'review' | 'quiz' | 'deck' | 'stats' | 'settings'

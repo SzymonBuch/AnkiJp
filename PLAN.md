@@ -131,20 +131,20 @@ Atrybucje wymagane licencjami (Tatoeba CC-BY 2.0, EDRDG, jpdb) umieszczone w apl
 ---
 
 ### Etap 6 — Deck, Dashboard, Settings
-- [ ] **Deck**: siatka/list 1006 kanji, filtr status (`new`/`learning`/`due`/`known`), wyszukiwarka, klik → szczegóły karty (pełna lista znaczeń, wszystkie zdania) + ręczne oznaczenie "known"
-- [ ] **Dashboard**: liczniki (nowe, zaległe, znane, streak), przyciski Study / Review / Quiz / Deck
-- [ ] **Stats**: ekran statystyk z historii w `log` — powtórki dziennie, retencja, accuracy, streak
-- [ ] **Settings**: limit nowych/dzień, limit powtórek/dzień, próg "known" dla quizu, reset postępu, eksport statystyk (JSON)
+- [x] **Deck**: siatka/list 1006 kanji, filtr status (`new`/`learning`/`due`/`known`), wyszukiwarka, klik → szczegóły karty (pełna lista znaczeń, wszystkie zdania) + ręczne oznaczenie "known"
+- [x] **Dashboard**: liczniki (nowe, zaległe, znane, streak), przyciski Study / Review / Quiz / Deck
+- [x] **Stats**: ekran statystyk z historii w `log` — powtórki dziennie, retencja, accuracy, streak
+- [x] **Settings**: limit nowych/dzień, limit powtórek/dzień, próg "known" dla quizu, reset postępu, eksport statystyk (JSON)
 
-**Kryterium akceptacji:** wszystkie ekrany nawigowalne, ustawienia zapisywane w IndexedDB.
+**Kryterium akceptacji:** ✅ wszystkie ekrany nawigowalne, ustawienia zapisywane w IndexedDB.
 
 ---
 
 ### Etap 7 — Testy, atrybucje, publikacja
-- [ ] Przegląd mobile-first (iPhone + Android + Chrome/Edge) — dotyk, wielkości przycisków
-- [ ] Atrybucje: Tatoeba (CC-BY 2.0), EDRDG/KANJIDIC (licencja EDRDG), jpdb
-- [ ] Instrukcja instalacji PWA w README
-- [ ] (opcjonalnie) deploy na GitHub Pages / Netlify / Vercel — sekcja w README
+- [x] Przegląd mobile-first (iPhone + Android + Chrome/Edge) — dotyk, wielkości przycisków: min. 44 px dla wszystkich interaktywnych elementów (przyciski headerów, filtry, siatka Deck 5 kolumn na mobile), `touch-action: manipulation`, safe-area insets dla notcha, brak zoomu inputów na iOS (font-size 16 px)
+- [x] Atrybucje: Tatoeba (CC-BY 2.0), EDRDG/KANJIDIC (licencja EDRDG), jpdb — `ATTRIBUTIONS.md` + zwinięta sekcja w aplikacji z linkami do licencji
+- [x] Instrukcja instalacji PWA w README (Android/Chrome, iOS/Safari, desktop Chrome/Edge + uwaga o offline i backup)
+- [x] (opcjonalnie) deploy na GitHub Pages / Netlify / Vercel — sekcja w README
 
 **Kryterium akceptacji:** aplikacja działa offline na telefonie, licencje wymienione, README kompletne.
 
