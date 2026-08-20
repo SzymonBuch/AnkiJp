@@ -1,0 +1,269 @@
+import { openDB, type IDBPDatabase, type DBSchema } from 'idb'
+import { createCard, DAY_MS, rateCard, type CardState, type Rating, type SrsCard } from './srs'
+import { KANJI_DATA } from './kanji'
+
+export const DB_NAME = 'ankijp'
+const DB_VERSION = 1
+const SETTINGS_KEY = 'settings'
+
+export interface Settings {
+  newPerDay: number
+  reviewLimit: number
+  knownThresholdDays: number
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  newPerDay: 20,
+  reviewLimit: 200,
+  knownThresholdDays: 21,
+}
+
+export interface ReviewLog {
+  id?: number
+  kanji: string
+  rating: Rating
+  prevState: CardState
+  newState: CardState
+  interval: number
+  ease: number
+  due: number
+  timestamp: number
+}
+
+interface AnkiJpDB extends DBSchema {
+  cards: {
+    key: string
+    value: SrsCard
+  }
+  log: {
+    key: number
+    value: ReviewLog
+    indexes: { 'by-timestamp': number }
+  }
+  settings: {
+    key: string
+    value: Settings
+  }
+}
+
+let dbPromise: Promise<IDBPDatabase<AnkiJpDB>> | null = null
+
+function getDb(): Promise<IDBPDatabase<AnkiJpDB>> {
+  dbPromise ??= openDB<AnkiJpDB>(DB_NAME, DB_VERSION, {
+    upgrade(db) {
+      db.createObjectStore('cards', { keyPath: 'kanji' })
+      const logStore = db.createObjectStore('log', { keyPath: 'id', autoIncrement: true })
+      logStore.createIndex('by-timestamp', 'timestamp')
+      db.createObjectStore('settings')
+    },
+  })
+  return dbPromise
+}
+
+/** Close the cached connection (used by tests to simulate a page reload). */
+export function closeDb(): void {
+  const promise = dbPromise
+  dbPromise = null
+  promise?.then((db) => db.close()).catch(() => undefined)
+}
+
+/** Seed the cards store from bundled data on first run. Idempotent. */
+export async function ensureSeeded(): Promise<void> {
+  const db = await getDb()
+  const count = await db.count('cards')
+  if (count > 0) return
+  const now = Date.now()
+  const tx = db.transaction('cards', 'readwrite')
+  KANJI_DATA.forEach((entry, pos) => {
+    tx.store.put(createCard(entry.kanji, pos, now))
+  })
+  await tx.done
+}
+
+export async function getCard(kanji: string): Promise<SrsCard | undefined> {
+  return (await getDb()).get('cards', kanji)
+}
+
+export async function getAllCards(): Promise<SrsCard[]> {
+  return (await getDb()).getAll('cards')
+}
+
+export async function putCard(card: SrsCard): Promise<void> {
+  await (await getDb()).put('cards', card)
+}
+
+export async function bulkPutCards(cards: SrsCard[]): Promise<void> {
+  const db = await getDb()
+  const tx = db.transaction('cards', 'readwrite')
+  await Promise.all(cards.map((card) => tx.store.put(card)))
+  await tx.done
+}
+
+export async function addLog(entry: Omit<ReviewLog, 'id'>): Promise<void> {
+  await (await getDb()).add('log', entry)
+}
+
+export async function getLogs(): Promise<ReviewLog[]> {
+  const db = await getDb()
+  return db.getAllFromIndex('log', 'by-timestamp')
+}
+
+export async function getSettings(): Promise<Settings> {
+  const db = await getDb()
+  const saved = await db.get('settings', SETTINGS_KEY)
+  return { ...DEFAULT_SETTINGS, ...saved }
+}
+
+export async function setSettings(partial: Partial<Settings>): Promise<Settings> {
+  const db = await getDb()
+  const next = { ...(await getSettings()), ...partial }
+  await db.put('settings', next, SETTINGS_KEY)
+  return next
+}
+
+export interface DailyCounts {
+  /** New cards introduced today (first answer, prev state 'new'). */
+  newToday: number
+  /** Review cards answered today (prev state 'review'). */
+  reviewsToday: number
+}
+
+export async function getDailyCounts(now = Date.now()): Promise<DailyCounts> {
+  const start = startOfDay(now)
+  const range = IDBKeyRange.bound(start, now)
+  const logs = await (await getDb()).getAllFromIndex('log', 'by-timestamp', range)
+  let newToday = 0
+  let reviewsToday = 0
+  for (const log of logs) {
+    if (log.prevState === 'new') newToday++
+    else if (log.prevState === 'review') reviewsToday++
+  }
+  return { newToday, reviewsToday }
+}
+
+export interface SessionQueue {
+  /** Cards in learning/relearning steps whose step has elapsed (same-session). */
+  learning: SrsCard[]
+  /** Review cards due by the end of today. */
+  review: SrsCard[]
+  /** New cards to introduce today, up to the daily limit. */
+  fresh: SrsCard[]
+}
+
+export async function getSessionQueue(now = Date.now()): Promise<SessionQueue> {
+  await ensureSeeded()
+  const [settings, cards, counts] = await Promise.all([
+    getSettings(),
+    getAllCards(),
+    getDailyCounts(now),
+  ])
+  const endOfToday = startOfDay(now) + DAY_MS
+
+  const learning = cards
+    .filter((c) => (c.state === 'learning' || c.state === 'relearning') && c.due <= now)
+    .sort((a, b) => a.due - b.due)
+
+  const review = cards
+    .filter((c) => c.state === 'review' && c.due <= endOfToday)
+    .sort((a, b) => a.due - b.due)
+    .slice(0, Math.max(0, settings.reviewLimit - counts.reviewsToday))
+
+  const fresh = cards
+    .filter((c) => c.state === 'new')
+    .sort((a, b) => a.pos - b.pos)
+    .slice(0, Math.max(0, settings.newPerDay - counts.newToday))
+
+  return { learning, review, fresh }
+}
+
+/** Rate a card and persist the new state together with a log entry. */
+export async function answerCard(
+  kanji: string,
+  rating: Rating,
+  now = Date.now(),
+): Promise<SrsCard> {
+  await ensureSeeded()
+  const card = (await getCard(kanji)) ?? createCard(kanji, 0, now)
+  const updated = rateCard(card, rating, now)
+  await putCard(updated)
+  await addLog({
+    kanji,
+    rating,
+    prevState: card.state,
+    newState: updated.state,
+    interval: updated.interval,
+    ease: updated.ease,
+    due: updated.due,
+    timestamp: now,
+  })
+  return updated
+}
+
+export async function resetProgress(): Promise<void> {
+  const db = await getDb()
+  const tx = db.transaction(['cards', 'log'], 'readwrite')
+  await Promise.all([tx.objectStore('cards').clear(), tx.objectStore('log').clear()])
+  await tx.done
+  await ensureSeeded()
+}
+
+/** Manually flag a card as "known" (does not touch the SRS state or logs). */
+export async function markKnown(kanji: string, known: boolean): Promise<SrsCard | undefined> {
+  const card = await getCard(kanji)
+  if (!card) return undefined
+  const updated = { ...card, known }
+  await putCard(updated)
+  return updated
+}
+
+export interface Summary {
+  fresh: number
+  learning: number
+  due: number
+  known: number
+}
+
+/** Lightweight counters for dashboards; `known` = review cards at/over the known threshold. */
+export async function getSummary(now = Date.now()): Promise<Summary> {
+  await ensureSeeded()
+  const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
+  const endOfToday = startOfDay(now) + DAY_MS
+  const summary: Summary = { fresh: 0, learning: 0, due: 0, known: 0 }
+  for (const card of cards) {
+    if (card.state === 'new') summary.fresh++
+    else if (card.state === 'learning' || card.state === 'relearning') summary.learning++
+    else {
+      if (card.due <= endOfToday) summary.due++
+      if (card.known || card.interval >= settings.knownThresholdDays) summary.known++
+    }
+  }
+  return summary
+}
+
+export interface KnownPool {
+  /** Kanji that are "known": interval at/over the threshold or manually marked. */
+  kanji: string[]
+  thresholdDays: number
+}
+
+/**
+ * Kanji eligible for quiz pools — only "known" kanji (interval >= threshold
+ * or manually marked). Read-only: never modifies cards or logs.
+ */
+export async function getKnownPool(): Promise<KnownPool> {
+  await ensureSeeded()
+  const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
+  return {
+    kanji: cards
+      .filter((c) => c.known || c.interval >= settings.knownThresholdDays)
+      .sort((a, b) => a.pos - b.pos)
+      .map((c) => c.kanji),
+    thresholdDays: settings.knownThresholdDays,
+  }
+}
+
+function startOfDay(now: number): number {
+  const d = new Date(now)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
