@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { getKnownPool } from './db'
-import { getKanji, KANJI_DATA, type KanjiEntry } from './kanji'
-import { buildQuiz, type QuizMode, type QuizQuestion } from './quiz'
+import { getQuizPools, getSettings, setSettings, type QuizPools } from './db'
+import { getKanji, KANJI_DATA } from './kanji'
+import {
+  buildQuiz,
+  DEFAULT_QUIZ_CONFIG,
+  isClozeEligible,
+  passesFilters,
+  selectQuizTargets,
+  type QuizConfig,
+  type QuizMode,
+  type QuizQuestion,
+} from './quiz'
+import type { SrsCard } from './srs'
 
 export type QuizStatus = 'loading' | 'setup' | 'ready' | 'done' | 'empty'
 
@@ -11,10 +21,26 @@ export interface QuizAnswer {
   correct: boolean
 }
 
+export interface QuizSourceCounts {
+  known: number
+  progress: number
+  new: number
+}
+
 export interface QuizSession {
   status: QuizStatus
   mode: QuizMode | null
-  poolCount: number
+  config: QuizConfig
+  /** Live per-source counters under the current filters. */
+  counts: QuizSourceCounts
+  /** Max questions available from the selected sources under the current filters. */
+  maxCount: number
+  /** New kanji available for `extraNew` after the grade filter. */
+  maxExtraNew: number
+  /** Targets that could be asked in cloze mode (0 disables the mode button). */
+  clozeEligibleCount: number
+  canStart: boolean
+  updateConfig: (patch: Partial<QuizConfig>) => void
   questions: QuizQuestion[]
   current: QuizQuestion | null
   currentIndex: number
@@ -29,16 +55,20 @@ export interface QuizSession {
   restart: () => void
 }
 
+const EMPTY_POOLS: QuizPools = { known: [], progress: [], new: [] }
+
 /**
- * State for a single, isolated quiz run. The known-kanji pool is snapshotted
- * once when the hook mounts; answering never writes to the DB, so the quiz
- * cannot change SRS state or logs.
+ * State for a single, isolated quiz run. The card pools and the quiz config
+ * are snapshotted once when the hook mounts; answering never writes to the
+ * cards or logs, so the quiz cannot change SRS state.
  */
 export function useQuizSession(): QuizSession {
   const [status, setStatus] = useState<QuizStatus>('loading')
   const [mode, setMode] = useState<QuizMode | null>(null)
-  const [poolCount, setPoolCount] = useState(0)
-  const [poolEntries, setPoolEntries] = useState<KanjiEntry[]>([])
+  const [pools, setPools] = useState<QuizPools>(EMPTY_POOLS)
+  const [config, setConfig] = useState<QuizConfig>(DEFAULT_QUIZ_CONFIG)
+  /** When the pools were snapshotted; all filters/sampling use this instant. */
+  const [snapshotAt, setSnapshotAt] = useState(0)
   const [questions, setQuestions] = useState<QuizQuestion[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [answers, setAnswers] = useState<QuizAnswer[]>([])
@@ -46,32 +76,82 @@ export function useQuizSession(): QuizSession {
 
   useEffect(() => {
     let cancelled = false
-    getKnownPool().then((pool) => {
+    Promise.all([getQuizPools(), getSettings()]).then(([loadedPools, settings]) => {
       if (cancelled) return
-      setPoolCount(pool.kanji.length)
-      setPoolEntries(pool.kanji.map((k) => getKanji(k)))
-      setStatus(pool.kanji.length === 0 ? 'empty' : 'setup')
+      setPools(loadedPools)
+      setConfig(clampConfig(settings.quiz, loadedPools, Date.now()))
+      setSnapshotAt(Date.now())
+      const isEmpty =
+        loadedPools.known.length === 0 &&
+        loadedPools.progress.length === 0 &&
+        loadedPools.new.length === 0
+      setStatus(isEmpty ? 'empty' : 'setup')
     })
     return () => {
       cancelled = true
     }
   }, [])
 
-  const buildQuestions = useCallback(
-    (nextMode: QuizMode): QuizQuestion[] => buildQuiz(nextMode, poolEntries, KANJI_DATA),
-    [poolEntries],
+  const counts = useMemo<QuizSourceCounts>(() => {
+    const grades = new Set(config.grades)
+    const matches = (cards: SrsCard[]) =>
+      cards.filter((c) => passesFilters(c, config, snapshotAt) && grades.has(getKanji(c.kanji).grade))
+        .length
+    return { known: matches(pools.known), progress: matches(pools.progress), new: matches(pools.new) }
+  }, [pools, config, snapshotAt])
+
+  const maxCount = config.sources.reduce((sum, source) => sum + counts[source], 0)
+
+  const maxExtraNew = useMemo(
+    () => pools.new.filter((c) => new Set(config.grades).has(getKanji(c.kanji).grade)).length,
+    [pools, config],
+  )
+
+  const clozeEligibleCount = useMemo(() => {
+    const grades = new Set(config.grades)
+    const seen = new Set<string>()
+    let eligible = 0
+    const consider = (cards: SrsCard[], applyFilters: boolean) => {
+      for (const card of cards) {
+        if (seen.has(card.kanji)) continue
+        seen.add(card.kanji)
+        const entry = getKanji(card.kanji)
+        if (!grades.has(entry.grade)) continue
+        if (applyFilters && !passesFilters(card, config, snapshotAt)) continue
+        if (isClozeEligible(entry)) eligible++
+      }
+    }
+    for (const source of config.sources) consider(pools[source], true)
+    consider(pools.new, false)
+    return eligible
+  }, [pools, config, snapshotAt])
+
+  const canStart = maxCount > 0 || (config.extraNew > 0 && maxExtraNew > 0)
+
+  const updateConfig = useCallback(
+    (patch: Partial<QuizConfig>) => {
+      const next = clampConfig({ ...config, ...patch }, pools, snapshotAt)
+      setConfig(next)
+      void setSettings({ quiz: next }).catch(() => undefined)
+    },
+    [config, pools, snapshotAt],
   )
 
   const start = useCallback(
     (nextMode: QuizMode) => {
+      const targets = selectQuizTargets(config, pools, {
+        now: snapshotAt,
+        predicate: nextMode === 'cloze' ? isClozeEligible : undefined,
+      })
+      if (targets.length === 0) return
       setMode(nextMode)
-      setQuestions(buildQuestions(nextMode))
+      setQuestions(buildQuiz(nextMode, targets, KANJI_DATA))
       setCurrentIndex(0)
       setAnswers([])
       setSelection(null)
       setStatus('ready')
     },
-    [buildQuestions],
+    [config, pools, snapshotAt],
   )
 
   const restart = useCallback(() => {
@@ -111,7 +191,13 @@ export function useQuizSession(): QuizSession {
   return {
     status,
     mode,
-    poolCount,
+    config,
+    counts,
+    maxCount,
+    maxExtraNew,
+    clozeEligibleCount,
+    canStart,
+    updateConfig,
     questions,
     current: questions[currentIndex] ?? null,
     currentIndex,
@@ -124,5 +210,22 @@ export function useQuizSession(): QuizSession {
     next,
     start,
     restart,
+  }
+}
+
+/** Clamp `count`/`extraNew` to what the snapshot actually offers right now. */
+function clampConfig(config: QuizConfig, pools: QuizPools, now: number): QuizConfig {
+  const grades = new Set(config.grades)
+  const inGrades = (card: SrsCard) => grades.has(getKanji(card.kanji).grade)
+  const poolSize = config.sources.reduce(
+    (sum, source) =>
+      sum + pools[source].filter((c) => passesFilters(c, config, now) && inGrades(c)).length,
+    0,
+  )
+  const newAvailable = pools.new.filter(inGrades).length
+  return {
+    ...config,
+    count: Math.min(Math.max(config.count, 1), Math.max(poolSize, 1)),
+    extraNew: Math.min(config.extraNew, newAvailable),
   }
 }

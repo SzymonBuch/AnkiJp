@@ -17,6 +17,7 @@ import {
   getDrawing,
   getKnownPool,
   getLogs,
+  getQuizPools,
   getSessionQueue,
   getSettings,
   getSummary,
@@ -28,6 +29,7 @@ import {
   setSettings,
 } from './db'
 import { KANJI_DATA } from './kanji'
+import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
 import { DAY_MS, MIN_MS, STARTING_EASE, rateCard } from './srs'
 
 const NOW = new Date('2026-08-20T12:00:00Z').getTime()
@@ -161,13 +163,87 @@ describe('settings', () => {
       newPerDay: 20,
       reviewLimit: 200,
       knownThresholdDays: 21,
+      quiz: DEFAULT_QUIZ_CONFIG,
     })
     await setSettings({ newPerDay: 5 })
     expect(await getSettings()).toEqual({
       newPerDay: 5,
       reviewLimit: 200,
       knownThresholdDays: 21,
+      quiz: DEFAULT_QUIZ_CONFIG,
     })
+  })
+})
+
+describe('quiz settings', () => {
+  it('roundtrips a custom quiz config', async () => {
+    const quiz: QuizConfig = {
+      sources: ['progress', 'new'],
+      grades: [3, 4],
+      count: 25,
+      extraNew: 5,
+      dueOnly: true,
+      problematicOnly: true,
+    }
+    await setSettings({ quiz })
+    expect((await getSettings()).quiz).toEqual(quiz)
+  })
+
+  it('deep-merges DEFAULT_QUIZ_CONFIG into a legacy save written before the field existed', async () => {
+    closeDb()
+    const raw = await openRawConnection()
+    try {
+      await rawPut(raw, 'settings', { newPerDay: 7, reviewLimit: 99, knownThresholdDays: 14 }, 'settings')
+    } finally {
+      raw.close()
+    }
+    closeDb()
+
+    const settings = await getSettings()
+    expect(settings.quiz).toEqual(DEFAULT_QUIZ_CONFIG)
+    expect(settings).toMatchObject({ newPerDay: 7, reviewLimit: 99, knownThresholdDays: 14 })
+  })
+})
+
+describe('quiz pools', () => {
+  it('classifies new / progress / known cards, excludes ignored and sorts by pos', async () => {
+    // pos 0: learning (progress)
+    await answerCard(KANJI_DATA[0].kanji, 'good', NOW)
+    // pos 1: graduated review below the threshold (progress)
+    const below = (await getCard(KANJI_DATA[1].kanji))!
+    below.state = 'review'
+    below.interval = 5
+    below.due = NOW + 3 * DAY_MS
+    await putCard(below)
+    // pos 2: manually marked known
+    await markKnown(KANJI_DATA[2].kanji, true, NOW)
+    // pos 3: review at the threshold (known without the flag)
+    const matured = (await getCard(KANJI_DATA[3].kanji))!
+    matured.state = 'review'
+    matured.interval = DEFAULT_SETTINGS.knownThresholdDays
+    matured.due = NOW + 30 * DAY_MS
+    await putCard(matured)
+    // pos 4: ignored — must vanish everywhere
+    await markIgnored(KANJI_DATA[4].kanji, true)
+
+    const pools = await getQuizPools()
+    expect(pools.progress.map((c) => c.kanji)).toEqual([KANJI_DATA[0].kanji, KANJI_DATA[1].kanji])
+    expect(pools.known.map((c) => c.kanji)).toEqual([KANJI_DATA[2].kanji, KANJI_DATA[3].kanji])
+    expect(pools.new[0].kanji).toBe(KANJI_DATA[5].kanji)
+    for (const pool of [pools.known, pools.progress, pools.new]) {
+      const positions = pool.map((c) => c.pos)
+      expect([...positions].sort((a, b) => a - b)).toEqual(positions)
+      for (const card of pool) expect(card.ignored).toBe(false)
+    }
+    expect(pools.new.map((c) => c.kanji)).not.toContain(KANJI_DATA[4].kanji)
+  })
+
+  it('is read-only: repeated calls never change cards or write logs', async () => {
+    await answerCard(KANJI_DATA[0].kanji, 'good', NOW)
+    await getQuizPools()
+    await getQuizPools()
+    expect(await getLogs()).toHaveLength(1)
+    expect(await getAllCards()).toHaveLength(KANJI_DATA.length)
   })
 })
 
@@ -570,10 +646,12 @@ function openLegacyV1(): Promise<IDBDatabase> {
   })
 }
 
-function rawPut(db: IDBDatabase, store: string, value: unknown): Promise<void> {
+function rawPut(db: IDBDatabase, store: string, value: unknown, key?: IDBValidKey): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(store, 'readwrite')
-    tx.objectStore(store).put(value)
+    const os = tx.objectStore(store)
+    if (key === undefined) os.put(value)
+    else os.put(value, key)
     tx.oncomplete = () => resolve(undefined)
     tx.onerror = () => reject(tx.error)
   })

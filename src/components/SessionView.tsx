@@ -64,13 +64,15 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
                 {session.remaining} left
               </span>
             )}
-            <button
-              type="button"
-              onClick={session.finish}
-              className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:text-slate-300"
-            >
-              End session
-            </button>
+            {(status === 'loading' || status === 'ready') && (
+              <button
+                type="button"
+                onClick={session.finish}
+                className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:text-slate-300"
+              >
+                End session
+              </button>
+            )}
           </div>
         </div>
       </header>

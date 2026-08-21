@@ -1,4 +1,4 @@
-import type { QuizQuestion } from '../lib/quiz'
+import type { QuestionMode, QuizQuestion } from '../lib/quiz'
 
 interface QuizQuestionViewProps {
   question: QuizQuestion
@@ -9,10 +9,11 @@ interface QuizQuestionViewProps {
   onNext: () => void
 }
 
-const INSTRUCTION: Record<QuizQuestion['mode'], string> = {
+const INSTRUCTION: Record<QuestionMode, string> = {
   reading: 'Choose the reading',
   meaning: 'Choose the meaning',
   reverse: 'Choose the kanji',
+  cloze: 'Choose the fitting kanji',
 }
 
 export function QuizQuestionView({
@@ -25,6 +26,7 @@ export function QuizQuestionView({
 }: QuizQuestionViewProps) {
   const answered = selection !== null
   const isReverse = question.mode === 'reverse'
+  const isCloze = question.mode === 'cloze'
 
   return (
     <div className="flex flex-col gap-6">
@@ -32,18 +34,29 @@ export function QuizQuestionView({
         <span>
           Question <span className="font-semibold text-slate-900 dark:text-slate-100">{index + 1}</span> of {total}
         </span>
-        <span className="text-slate-400 dark:text-slate-500">{INSTRUCTION[question.mode]}</span>
+        <span className="flex items-center gap-2">
+          <span className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs font-semibold text-slate-500 dark:border-slate-600 dark:text-slate-400">
+            G{question.grade}
+          </span>
+          <span className="text-slate-400 dark:text-slate-500">{INSTRUCTION[question.mode]}</span>
+        </span>
       </div>
 
-      <div className="flex flex-col items-center gap-2 py-6">
-        <div
-          className={`select-none leading-none ${
-            isReverse ? 'text-6xl font-medium' : 'text-[9rem] font-semibold sm:text-[11rem]'
-          }`}
-        >
+      {isCloze ? (
+        <div className="mx-auto max-w-sm py-6 text-center text-2xl font-medium leading-relaxed sm:text-3xl">
           {question.prompt}
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-col items-center gap-2 py-6">
+          <div
+            className={`select-none leading-none ${
+              isReverse ? 'text-6xl font-medium' : 'text-[9rem] font-semibold sm:text-[11rem]'
+            }`}
+          >
+            {question.prompt}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         {question.options.map((option) => {
@@ -80,6 +93,11 @@ export function QuizQuestionView({
               ? 'Correct!'
               : `Not quite — the answer is ${question.correct}`}
           </p>
+          {isCloze && question.sentenceEn && (
+            <p className="max-w-sm text-center text-sm text-slate-500 dark:text-slate-400">
+              {question.sentenceEn}
+            </p>
+          )}
           <button
             type="button"
             onClick={onNext}

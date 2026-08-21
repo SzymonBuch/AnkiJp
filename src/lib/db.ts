@@ -1,6 +1,7 @@
 import { openDB, type IDBPDatabase, type DBSchema } from 'idb'
 import { createCard, DAY_MS, rateCard, type CardState, type KnownSnapshot, type Rating, type SrsCard } from './srs'
 import { KANJI_DATA } from './kanji'
+import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
 
 export const DB_NAME = 'ankijp'
 export const DB_VERSION = 2
@@ -10,12 +11,14 @@ export interface Settings {
   newPerDay: number
   reviewLimit: number
   knownThresholdDays: number
+  quiz: QuizConfig
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   newPerDay: 20,
   reviewLimit: 200,
   knownThresholdDays: 21,
+  quiz: DEFAULT_QUIZ_CONFIG,
 }
 
 export interface ReviewLog {
@@ -163,7 +166,11 @@ export async function getLogs(): Promise<ReviewLog[]> {
 export async function getSettings(): Promise<Settings> {
   const db = await getDb()
   const saved = await db.get('settings', SETTINGS_KEY)
-  return { ...DEFAULT_SETTINGS, ...saved }
+  return {
+    ...DEFAULT_SETTINGS,
+    ...saved,
+    quiz: { ...DEFAULT_SETTINGS.quiz, ...saved?.quiz },
+  }
 }
 
 export async function setSettings(partial: Partial<Settings>): Promise<Settings> {
@@ -371,6 +378,37 @@ export async function getKnownPool(): Promise<KnownPool> {
       .map((c) => c.kanji),
     thresholdDays: settings.knownThresholdDays,
   }
+}
+
+export interface QuizPools {
+  /** Known: flagged as known or interval at/over the known threshold. */
+  known: SrsCard[]
+  /** In progress: learning/relearning/review, not known, below the threshold. */
+  progress: SrsCard[]
+  /** Never studied. */
+  new: SrsCard[]
+}
+
+/**
+ * Card pools for quiz setup. Read-only: never modifies cards or logs.
+ * Ignored cards are excluded; each pool is sorted by seed position. Returns
+ * cards (not kanji) so filters can use `due`/`lapses`/`ease`.
+ */
+export async function getQuizPools(): Promise<QuizPools> {
+  await ensureSeeded()
+  const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
+  const pools: QuizPools = { known: [], progress: [], new: [] }
+  for (const card of cards) {
+    if (card.ignored) continue
+    if (card.known || card.interval >= settings.knownThresholdDays) pools.known.push(card)
+    else if (card.state === 'new') pools.new.push(card)
+    else pools.progress.push(card)
+  }
+  const byPos = (a: SrsCard, b: SrsCard) => a.pos - b.pos
+  pools.known.sort(byPos)
+  pools.progress.sort(byPos)
+  pools.new.sort(byPos)
+  return pools
 }
 
 function startOfDay(now: number): number {

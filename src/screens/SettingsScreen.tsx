@@ -37,7 +37,7 @@ export function SettingsScreen({ onExit }: SettingsScreenProps) {
     })
   }, [])
 
-  const updateNumber = (key: keyof Settings, raw: string) => {
+  const updateNumber = (key: 'newPerDay' | 'reviewLimit' | 'knownThresholdDays', raw: string) => {
     const value = Math.max(1, Math.floor(Number(raw) || DEFAULT_SETTINGS[key]))
     setDraft((prev) => ({ ...prev, [key]: value }))
   }

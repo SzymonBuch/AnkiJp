@@ -5,6 +5,8 @@ const MODE_LABEL: Record<QuizMode, string> = {
   reading: 'Reading',
   meaning: 'Meaning',
   reverse: 'Reverse',
+  mixed: 'Mixed',
+  cloze: 'Cloze',
 }
 
 interface QuizSummaryProps {
