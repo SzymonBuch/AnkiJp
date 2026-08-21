@@ -43,7 +43,18 @@ export function QuizScreen({ onExit }: { onExit: () => void }) {
       <main className="mx-auto w-full max-w-xl flex-1 p-4">
         {quiz.status === 'loading' && <p className="py-12 text-center text-slate-500 dark:text-slate-400">Loading…</p>}
         {quiz.status === 'empty' && <EmptyState onExit={onExit} />}
-        {quiz.status === 'setup' && <QuizSetup poolCount={quiz.poolCount} onStart={quiz.start} />}
+        {quiz.status === 'setup' && (
+          <QuizSetup
+            config={quiz.config}
+            counts={quiz.counts}
+            maxCount={quiz.maxCount}
+            maxExtraNew={quiz.maxExtraNew}
+            clozeEligibleCount={quiz.clozeEligibleCount}
+            canStart={quiz.canStart}
+            onChange={quiz.updateConfig}
+            onStart={quiz.start}
+          />
+        )}
         {quiz.status === 'ready' && quiz.current && (
           <QuizQuestionView
             question={quiz.current}
@@ -72,10 +83,10 @@ export function QuizScreen({ onExit }: { onExit: () => void }) {
 function EmptyState({ onExit }: { onExit: () => void }) {
   return (
     <div className="flex flex-col items-center gap-6 py-16 text-center">
-      <h2 className="text-2xl font-semibold">No known kanji yet</h2>
+      <h2 className="text-2xl font-semibold">Nothing to quiz yet</h2>
       <p className="max-w-sm text-slate-600 dark:text-slate-300">
-        Quizzes only include kanji you already know. Keep studying until cards reach the known
-        interval, or mark them as known from the Deck.
+        Your deck is empty of quizable kanji. Study a few first — quizzes can draw from kanji
+        you know, ones in progress, or even brand-new cards.
       </p>
       <button
         type="button"
