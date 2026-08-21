@@ -91,7 +91,7 @@ export function StudyCard({ entry, revealed, drawing, onReveal, onRate, onIgnore
           {entry.sentences.slice(0, 3).map((sentence, index) => (
             <li key={index}>
               <div className="text-lg leading-relaxed">
-                <Furigana html={sentence.furigana} />
+                <Furigana html={sentence.furigana} highlight={entry.kanji} />
               </div>
               <div className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{sentence.en}</div>
             </li>
