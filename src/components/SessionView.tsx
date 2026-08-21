@@ -80,6 +80,7 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
         {status === 'ready' && session.current && (
           <StudyCard
             entry={getKanji(session.current.kanji)}
+            card={session.current}
             revealed={revealed}
             drawing={drawings.get(session.current.kanji) ?? null}
             onReveal={reveal}

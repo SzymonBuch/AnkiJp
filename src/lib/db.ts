@@ -311,6 +311,8 @@ export interface Summary {
   learning: number
   due: number
   known: number
+  /** Graduated review cards not due today, still below the known threshold. */
+  future: number
 }
 
 /** Lightweight counters for dashboards; `known` = review cards at/over the known threshold. */
@@ -318,7 +320,7 @@ export async function getSummary(now = Date.now()): Promise<Summary> {
   await ensureSeeded()
   const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
   const endOfToday = startOfDay(now) + DAY_MS
-  const summary: Summary = { fresh: 0, learning: 0, due: 0, known: 0 }
+  const summary: Summary = { fresh: 0, learning: 0, due: 0, known: 0, future: 0 }
   for (const card of cards) {
     if (card.ignored) continue
     if (card.state === 'new') summary.fresh++
@@ -326,6 +328,7 @@ export async function getSummary(now = Date.now()): Promise<Summary> {
     else {
       if (card.due <= endOfToday) summary.due++
       if (card.known || card.interval >= settings.knownThresholdDays) summary.known++
+      else if (card.due > endOfToday) summary.future++
     }
   }
   return summary

@@ -1,10 +1,11 @@
 import type { KanjiEntry } from '../lib/kanji'
-import type { Rating } from '../lib/srs'
+import type { Rating, SrsCard } from '../lib/srs'
 import { Furigana } from './Furigana'
 import { RatingButtons } from './RatingButtons'
 
 interface StudyCardProps {
   entry: KanjiEntry
+  card?: SrsCard | null
   revealed: boolean
   drawing?: string | null
   onReveal: () => void
@@ -12,7 +13,7 @@ interface StudyCardProps {
   onIgnore: () => void
 }
 
-export function StudyCard({ entry, revealed, drawing, onReveal, onRate, onIgnore }: StudyCardProps) {
+export function StudyCard({ entry, card, revealed, drawing, onReveal, onRate, onIgnore }: StudyCardProps) {
   if (!revealed) {
     return (
       <div className="flex flex-col items-center gap-10 py-12">
@@ -132,7 +133,7 @@ export function StudyCard({ entry, revealed, drawing, onReveal, onRate, onIgnore
         </div>
       )}
 
-      <RatingButtons onRate={onRate} />
+      <RatingButtons card={card} onRate={onRate} />
 
       <div className="mt-2 flex justify-center">
         <IgnoreButton onIgnore={onIgnore} />

@@ -14,6 +14,8 @@ import {
   STARTING_EASE,
   fuzzedInterval,
   rateCard,
+  ratingOutcome,
+  type Rating,
   type SrsCard,
 } from './srs'
 
@@ -208,6 +210,52 @@ describe('relearning', () => {
     expect(c.state).toBe('relearning')
     expect(c.step).toBe(0)
     expect(c.due).toBe(NOW + MIN_MS + RELEARNING_STEPS_MIN[0] * MIN_MS)
+  })
+})
+
+describe('ratingOutcome', () => {
+  const newCard = createCard('一', 0, NOW)
+  const learnStep0 = rateCard(createCard('一', 0, NOW), 'again', NOW)
+  const learnStep1 = rateCard(rateCard(createCard('一', 0, NOW), 'good', NOW), 'good', NOW)
+  const relearning = rateCard(reviewCard({ interval: 100 }), 'again', NOW)
+  const review = reviewCard()
+
+  const cases: [name: string, card: SrsCard, rating: Rating, expected: string][] = [
+    ['new / again -> first learning step', newCard, 'again', '1 min'],
+    ['new / hard -> first learning step', newCard, 'hard', '1 min'],
+    ['new / good -> first learning step', newCard, 'good', '1 min'],
+    ['new / easy -> graduates at the easy interval', newCard, 'easy', '~4 days'],
+
+    ['learning step 0 / again -> stays on step 0', learnStep0, 'again', '1 min'],
+    ['learning step 0 / hard -> stays on step 0', learnStep0, 'hard', '1 min'],
+    ['learning step 0 / good -> advances to step 1', learnStep0, 'good', '10 min'],
+    ['learning step 0 / easy -> graduates early', learnStep0, 'easy', '~4 days'],
+
+    ['learning step 1 / again -> back to step 0', learnStep1, 'again', '1 min'],
+    ['learning step 1 / hard -> back to step 0', learnStep1, 'hard', '1 min'],
+    ['learning step 1 / good -> graduates', learnStep1, 'good', '~1 day'],
+    ['learning step 1 / easy -> graduates at the easy interval', learnStep1, 'easy', '~4 days'],
+
+    ['relearning / again -> repeats the step', relearning, 'again', 'relearn 10 min'],
+    ['relearning / hard -> repeats the step', relearning, 'hard', 'relearn 10 min'],
+    ['relearning / good -> back to review', relearning, 'good', '~1 day'],
+    ['relearning / easy -> back to review', relearning, 'easy', '~1 day'],
+
+    ['review / again -> lapse into relearning', review, 'again', 'relearn 10 min'],
+    ['review / hard -> interval x1.2', review, 'hard', '~12 days'],
+    ['review / good -> interval x ease (min fuzz edge)', review, 'good', '~24 days'],
+    ['review / easy -> interval x ease x1.3 (min fuzz edge)', review, 'easy', '~32 days'],
+  ]
+
+  it.each(cases)('%s', (_name, card, rating, expected) => {
+    expect(ratingOutcome(card, rating)).toBe(expected)
+  })
+
+  it('does not mutate the input card', () => {
+    const input = reviewCard()
+    const before = { ...input }
+    ratingOutcome(input, 'easy')
+    expect(input).toEqual(before)
   })
 })
 

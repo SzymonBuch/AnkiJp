@@ -46,10 +46,15 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       </div>
 
       {summary && (
-        <div className="grid w-full max-w-sm grid-cols-4 gap-2 text-center">
+        <div className="grid w-full max-w-sm grid-cols-2 gap-2 text-center sm:grid-cols-5">
           <Counter label="New" value={summary.fresh} accent="text-slate-700 dark:text-slate-300" />
           <Counter label="Learning" value={summary.learning} accent="text-amber-600 dark:text-amber-400" />
           <Counter label="Due" value={summary.due} accent="text-red-600 dark:text-red-400" />
+          <Counter
+            label="Future reviews"
+            value={summary.future}
+            accent="text-blue-600 dark:text-blue-400"
+          />
           <div className="rounded-xl border border-slate-200 bg-white px-1 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <div className="text-2xl font-bold tabular-nums text-green-700 dark:text-green-400" data-testid="dashboard-streak">
               {streak}

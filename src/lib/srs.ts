@@ -149,6 +149,23 @@ function rateReview(card: SrsCard, rating: Rating, now: number, rng: () => numbe
   }
 }
 
+/**
+ * Short description of what answering `rating` would do to `card`
+ * (e.g. "1 min", "~4 days", "relearn 10 min"). Derived from rateCard itself —
+ * never reimplement the rules here — so the two cannot drift apart.
+ * Day-scale results carry a `~` because fuzz is rolled at answer time
+ * (shown at the minimum fuzz edge).
+ */
+export function ratingOutcome(card: SrsCard, rating: Rating): string {
+  const next = rateCard(card, rating, 0, () => 0)
+  if (next.due < DAY_MS) {
+    const mins = Math.round(next.due / MIN_MS)
+    return next.state === 'relearning' ? `relearn ${mins} min` : `${mins} min`
+  }
+  const days = Math.round(next.due / DAY_MS)
+  return `~${days} ${days === 1 ? 'day' : 'days'}`
+}
+
 function graduate(card: SrsCard, now: number, intervalDays: number, rng: () => number): SrsCard {
   card.state = 'review'
   card.interval = Math.min(MAX_INTERVAL_DAYS, fuzzedInterval(intervalDays, rng))

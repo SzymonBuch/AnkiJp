@@ -196,6 +196,47 @@ describe('summary', () => {
     expect(summary.known).toBe(1)
     expect(summary.due).toBe(0)
   })
+
+  it('counts future reviews: graduated, not due today, below the known threshold', async () => {
+    await setSettings({ knownThresholdDays: 21 })
+
+    // In the pipeline: graduated, due beyond today, interval below the threshold.
+    const future = (await getCard(KANJI_DATA[0].kanji))!
+    future.state = 'review'
+    future.interval = 5
+    future.due = NOW + 3 * DAY_MS
+    await putCard(future)
+
+    // Due today -> counts as due, not future.
+    const due = (await getCard(KANJI_DATA[1].kanji))!
+    due.state = 'review'
+    due.interval = 5
+    due.due = NOW - 60_000
+    await putCard(due)
+
+    // At/over the threshold -> counts as known, not future.
+    const matured = (await getCard(KANJI_DATA[2].kanji))!
+    matured.state = 'review'
+    matured.interval = 21
+    matured.due = NOW + 30 * DAY_MS
+    await putCard(matured)
+
+    // Manually marked known -> never future.
+    const marked = (await getCard(KANJI_DATA[3].kanji))!
+    marked.state = 'review'
+    marked.interval = 5
+    marked.due = NOW + 30 * DAY_MS
+    marked.known = true
+    await putCard(marked)
+
+    expect(await getSummary(NOW)).toMatchObject({
+      fresh: KANJI_DATA.length - 4,
+      learning: 0,
+      due: 1,
+      known: 2,
+      future: 1,
+    })
+  })
 })
 
 describe('known pool', () => {
@@ -349,6 +390,7 @@ describe('markIgnored', () => {
       learning: 0,
       due: 0,
       known: 0,
+      future: 0,
     })
 
     await markIgnored(KANJI_DATA[0].kanji, false)
