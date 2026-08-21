@@ -131,6 +131,26 @@ export async function bulkPutCards(cards: SrsCard[]): Promise<void> {
   await tx.done
 }
 
+export async function getDrawing(kanji: string): Promise<Drawing | undefined> {
+  return (await getDb()).get('drawings', kanji)
+}
+
+export async function putDrawing(drawing: Drawing): Promise<void> {
+  await (await getDb()).put('drawings', drawing)
+}
+
+export async function deleteDrawing(kanji: string): Promise<void> {
+  await (await getDb()).delete('drawings', kanji)
+}
+
+export async function getAllDrawings(): Promise<Drawing[]> {
+  return (await getDb()).getAll('drawings')
+}
+
+export async function clearDrawings(): Promise<void> {
+  await (await getDb()).clear('drawings')
+}
+
 export async function addLog(entry: Omit<ReviewLog, 'id'>): Promise<void> {
   await (await getDb()).add('log', entry)
 }

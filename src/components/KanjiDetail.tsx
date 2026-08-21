@@ -8,8 +8,11 @@ export interface KanjiDetailProps {
   entry: KanjiEntry
   card: SrsCard
   settings: Settings
+  drawing?: string | null
   onToggleKnown: (known: boolean) => void
   onToggleIgnored: (ignored: boolean) => void
+  onDraw: () => void
+  onDeleteDrawing: () => void
   onClose: () => void
 }
 
@@ -21,7 +24,7 @@ const STATE_LABEL: Record<SrsCard['state'], string> = {
 }
 
 /** Full card details: every meaning and every example sentence plus SRS state. */
-export function KanjiDetail({ entry, card, settings, onToggleKnown, onToggleIgnored, onClose }: KanjiDetailProps) {
+export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onToggleIgnored, onDraw, onDeleteDrawing, onClose }: KanjiDetailProps) {
   const meanings = entry.meanings.length > 0 && entry.meanings[0] !== entry.meaning
     ? entry.meanings
     : [entry.meaning]
@@ -154,6 +157,39 @@ export function KanjiDetail({ entry, card, settings, onToggleKnown, onToggleIgno
             ) : (
               <p className="italic text-slate-400">Mnemonic coming soon.</p>
             )}
+          </section>
+
+          <section className="mt-5 rounded-xl border border-slate-200 bg-white p-4">
+            <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-slate-500">
+              My drawing
+            </h3>
+            {drawing ? (
+              <img
+                src={drawing}
+                alt={`Hand-drawn mnemonic for ${entry.kanji}`}
+                className="h-32 w-32 rounded-lg border border-slate-200"
+              />
+            ) : (
+              <p className="italic text-slate-400">No drawing yet.</p>
+            )}
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={onDraw}
+                className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-600 transition active:scale-95"
+              >
+                {drawing ? 'Edit drawing' : 'Draw'}
+              </button>
+              {drawing && (
+                <button
+                  type="button"
+                  onClick={onDeleteDrawing}
+                  className="min-h-11 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700 transition active:scale-95"
+                >
+                  Delete
+                </button>
+              )}
+            </div>
           </section>
         </div>
       </div>

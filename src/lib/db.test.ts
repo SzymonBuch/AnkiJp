@@ -6,11 +6,15 @@ import {
   DB_VERSION,
   DEFAULT_SETTINGS,
   answerCard,
+  clearDrawings,
   closeDb,
+  deleteDrawing,
   ensureSeeded,
   getAllCards,
+  getAllDrawings,
   getCard,
   getDailyCounts,
+  getDrawing,
   getKnownPool,
   getLogs,
   getSessionQueue,
@@ -19,6 +23,7 @@ import {
   markIgnored,
   markKnown,
   putCard,
+  putDrawing,
   resetProgress,
   setSettings,
 } from './db'
@@ -374,6 +379,48 @@ describe('markIgnored', () => {
     const restored = (await markIgnored('一', false))!
     expect(restored).toEqual({ ...card, knownPrev: null })
     expect((await getSessionQueue(NOW + MIN_MS)).learning.map((c) => c.kanji)).toContain('一')
+  })
+})
+
+describe('drawings', () => {
+  const A = { kanji: '一', dataUrl: 'data:image/png;base64,AAA', updatedAt: NOW }
+  const B = { kanji: '二', dataUrl: 'data:image/png;base64,BBB', updatedAt: NOW }
+
+  it('puts, gets, updates, lists and deletes drawings', async () => {
+    expect(await getDrawing('一')).toBeUndefined()
+    expect(await getAllDrawings()).toEqual([])
+
+    await putDrawing(A)
+    await putDrawing(B)
+    expect(await getDrawing('一')).toEqual(A)
+    expect(await getAllDrawings()).toHaveLength(2)
+
+    const updated = { ...A, dataUrl: 'data:image/png;base64,CCC', updatedAt: NOW + 1 }
+    await putDrawing(updated)
+    expect(await getDrawing('一')).toEqual(updated)
+    expect(await getAllDrawings()).toHaveLength(2)
+
+    await deleteDrawing('一')
+    expect(await getDrawing('一')).toBeUndefined()
+    expect(await getAllDrawings()).toEqual([B])
+
+    await clearDrawings()
+    expect(await getAllDrawings()).toEqual([])
+  })
+
+  it('survives closeDb and reopening the database', async () => {
+    await putDrawing(A)
+    closeDb()
+    expect(await getDrawing('一')).toEqual(A)
+    expect(await getAllDrawings()).toEqual([A])
+  })
+
+  it('resetProgress keeps drawings (they are personal notes, not SRS state)', async () => {
+    await putDrawing(A)
+    await answerCard('一', 'good', NOW)
+    await resetProgress()
+    expect(await getDrawing('一')).toEqual(A)
+    expect(await getCard('一')).toMatchObject({ state: 'new' })
   })
 })
 

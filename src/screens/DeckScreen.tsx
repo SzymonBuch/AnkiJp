@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
+import { DrawingPad } from '../components/DrawingPad'
 import { KanjiDetail } from '../components/KanjiDetail'
-import { getAllCards, getCard, getSettings, markIgnored, markKnown, type Settings } from '../lib/db'
+import {
+  deleteDrawing,
+  getAllCards,
+  getAllDrawings,
+  getCard,
+  getSettings,
+  markIgnored,
+  markKnown,
+  putDrawing,
+  type Settings,
+} from '../lib/db'
 import { DAY_MS, type SrsCard } from '../lib/srs'
 import { getKanji } from '../lib/kanji'
 
@@ -40,16 +51,21 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<SrsCard | null>(null)
+  const [drawings, setDrawings] = useState<Record<string, string>>({})
+  const [padOpen, setPadOpen] = useState(false)
   const [now, setNow] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([getAllCards(), getSettings()]).then(([cardData, settingsData]) => {
-      if (cancelled) return
-      setCards(cardData)
-      setSettings(settingsData)
-      setNow(Date.now())
-    })
+    Promise.all([getAllCards(), getSettings(), getAllDrawings()]).then(
+      ([cardData, settingsData, drawingData]) => {
+        if (cancelled) return
+        setCards(cardData)
+        setSettings(settingsData)
+        setDrawings(Object.fromEntries(drawingData.map((d) => [d.kanji, d.dataUrl])))
+        setNow(Date.now())
+      },
+    )
     return () => {
       cancelled = true
     }
@@ -93,6 +109,23 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
 
   const toggleIgnored = (kanji: string, ignored: boolean) =>
     toggleCard(kanji, (k) => markIgnored(k, ignored))
+
+  const saveDrawing = async (dataUrl: string) => {
+    if (!selected) return
+    await putDrawing({ kanji: selected.kanji, dataUrl, updatedAt: Date.now() })
+    setDrawings((prev) => ({ ...prev, [selected.kanji]: dataUrl }))
+    setPadOpen(false)
+  }
+
+  const removeDrawing = async () => {
+    if (!selected) return
+    await deleteDrawing(selected.kanji)
+    setDrawings((prev) => {
+      const next = { ...prev }
+      delete next[selected.kanji]
+      return next
+    })
+  }
 
   return (
     <div className="flex min-h-svh flex-col">
@@ -169,9 +202,21 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
           entry={getKanji(selected.kanji)}
           card={selected}
           settings={settings}
+          drawing={drawings[selected.kanji] ?? null}
           onToggleKnown={(known) => toggleKnown(selected.kanji, known)}
           onToggleIgnored={(ignored) => toggleIgnored(selected.kanji, ignored)}
+          onDraw={() => setPadOpen(true)}
+          onDeleteDrawing={removeDrawing}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {selected && padOpen && (
+        <DrawingPad
+          kanji={selected.kanji}
+          initial={drawings[selected.kanji] ?? null}
+          onSave={saveDrawing}
+          onClose={() => setPadOpen(false)}
         />
       )}
     </div>

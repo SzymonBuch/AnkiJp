@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
   DEFAULT_SETTINGS,
+  clearDrawings,
   getAllCards,
+  getAllDrawings,
   getLogs,
   getSettings,
   getSummary,
@@ -39,20 +41,22 @@ export function SettingsScreen({ onExit }: SettingsScreenProps) {
   }
 
   const exportStats = async () => {
-    const [settings, logs, cards, summary] = await Promise.all([
+    const [settings, logs, cards, summary, drawings] = await Promise.all([
       getSettings(),
       getLogs(),
       getAllCards(),
       getSummary(),
+      getAllDrawings(),
     ])
     const payload = {
       exportedAt: new Date().toISOString(),
-      version: 1,
+      version: 2,
       settings,
       summary,
       stats: computeStats(logs),
       cards,
       logs,
+      drawings,
     }
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }))
     const link = document.createElement('a')
@@ -68,6 +72,11 @@ export function SettingsScreen({ onExit }: SettingsScreenProps) {
     setSaved(settings)
     setDraft(settings)
     setMessage('Progress reset. Cards have been reseeded.')
+  }
+
+  const clearAllDrawings = async () => {
+    await clearDrawings()
+    setMessage('All drawings cleared.')
   }
 
   return (
@@ -129,6 +138,17 @@ export function SettingsScreen({ onExit }: SettingsScreenProps) {
                 className="w-full rounded-xl border border-slate-300 bg-white px-6 py-3 font-medium text-slate-700 shadow-sm transition active:scale-95"
               >
                 Export statistics (JSON)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Delete all drawings? This cannot be undone.')) {
+                    clearAllDrawings().catch(() => setMessage('Failed to clear drawings.'))
+                  }
+                }}
+                className="w-full rounded-xl border border-red-200 bg-red-50 px-6 py-3 font-medium text-red-700 shadow-sm transition active:scale-95"
+              >
+                Clear drawings
               </button>
               <button
                 type="button"

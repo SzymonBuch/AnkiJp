@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { getAllDrawings } from '../lib/db'
 import { getKanji } from '../lib/kanji'
 import type { Rating } from '../lib/srs'
 import {
@@ -17,6 +18,17 @@ interface SessionViewProps {
 export function SessionView({ kind, title, onExit }: SessionViewProps) {
   const session = useStudySession(kind)
   const { status, revealed, rate, reveal } = session
+  const [drawings, setDrawings] = useState<Map<string, string>>(new Map())
+
+  useEffect(() => {
+    let cancelled = false
+    getAllDrawings().then((list) => {
+      if (!cancelled) setDrawings(new Map(list.map((d) => [d.kanji, d.dataUrl])))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const shortcuts: Record<string, Rating> = {
@@ -69,6 +81,7 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
           <StudyCard
             entry={getKanji(session.current.kanji)}
             revealed={revealed}
+            drawing={drawings.get(session.current.kanji) ?? null}
             onReveal={reveal}
             onRate={rate}
             onIgnore={session.ignore}

@@ -6,12 +6,13 @@ import { RatingButtons } from './RatingButtons'
 interface StudyCardProps {
   entry: KanjiEntry
   revealed: boolean
+  drawing?: string | null
   onReveal: () => void
   onRate: (rating: Rating) => void
   onIgnore: () => void
 }
 
-export function StudyCard({ entry, revealed, onReveal, onRate, onIgnore }: StudyCardProps) {
+export function StudyCard({ entry, revealed, drawing, onReveal, onRate, onIgnore }: StudyCardProps) {
   if (!revealed) {
     return (
       <div className="flex flex-col items-center gap-10 py-12">
@@ -117,6 +118,19 @@ export function StudyCard({ entry, revealed, onReveal, onRate, onIgnore }: Study
           <p className="italic text-slate-400">Mnemonic coming soon.</p>
         )}
       </div>
+
+      {drawing && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-slate-500">
+            My drawing
+          </h3>
+          <img
+            src={drawing}
+            alt={`Hand-drawn mnemonic for ${entry.kanji}`}
+            className="h-40 w-40 rounded-lg border border-slate-200"
+          />
+        </div>
+      )}
 
       <RatingButtons onRate={onRate} />
 
