@@ -71,6 +71,7 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
             revealed={revealed}
             onReveal={reveal}
             onRate={rate}
+            onIgnore={session.ignore}
           />
         )}
         {(status === 'done' || status === 'empty') && (

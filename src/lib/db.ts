@@ -3,7 +3,7 @@ import { createCard, DAY_MS, rateCard, type CardState, type KnownSnapshot, type 
 import { KANJI_DATA } from './kanji'
 
 export const DB_NAME = 'ankijp'
-const DB_VERSION = 1
+export const DB_VERSION = 2
 const SETTINGS_KEY = 'settings'
 
 export interface Settings {
@@ -30,6 +30,13 @@ export interface ReviewLog {
   timestamp: number
 }
 
+/** User-drawn mnemonic sketch for a kanji (F3 drawing pad). */
+export interface Drawing {
+  kanji: string
+  dataUrl: string
+  updatedAt: number
+}
+
 interface AnkiJpDB extends DBSchema {
   cards: {
     key: string
@@ -44,17 +51,42 @@ interface AnkiJpDB extends DBSchema {
     key: string
     value: Settings
   }
+  drawings: {
+    key: string
+    value: Drawing
+  }
 }
 
 let dbPromise: Promise<IDBPDatabase<AnkiJpDB>> | null = null
 
 function getDb(): Promise<IDBPDatabase<AnkiJpDB>> {
   dbPromise ??= openDB<AnkiJpDB>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      db.createObjectStore('cards', { keyPath: 'kanji' })
-      const logStore = db.createObjectStore('log', { keyPath: 'id', autoIncrement: true })
-      logStore.createIndex('by-timestamp', 'timestamp')
-      db.createObjectStore('settings')
+    async upgrade(db, oldVersion, _newVersion, tx) {
+      if (!db.objectStoreNames.contains('cards')) {
+        db.createObjectStore('cards', { keyPath: 'kanji' })
+      }
+      if (!db.objectStoreNames.contains('log')) {
+        const logStore = db.createObjectStore('log', { keyPath: 'id', autoIncrement: true })
+        logStore.createIndex('by-timestamp', 'timestamp')
+      }
+      if (!db.objectStoreNames.contains('settings')) {
+        db.createObjectStore('settings')
+      }
+      // Reserved for the drawing pad (F3); created in the same version bump.
+      if (!db.objectStoreNames.contains('drawings')) {
+        db.createObjectStore('drawings', { keyPath: 'kanji' })
+      }
+      if (oldVersion < 2) {
+        const store = tx.objectStore('cards')
+        for (const card of await store.getAll()) {
+          const legacy = card as Partial<SrsCard>
+          await store.put({
+            ...card,
+            ignored: legacy.ignored ?? false,
+            knownPrev: legacy.knownPrev ?? null,
+          })
+        }
+      }
     },
   })
   return dbPromise
@@ -160,16 +192,16 @@ export async function getSessionQueue(now = Date.now()): Promise<SessionQueue> {
   const endOfToday = startOfDay(now) + DAY_MS
 
   const learning = cards
-    .filter((c) => (c.state === 'learning' || c.state === 'relearning') && c.due <= now)
+    .filter((c) => (c.state === 'learning' || c.state === 'relearning') && c.due <= now && !c.ignored)
     .sort((a, b) => a.due - b.due)
 
   const review = cards
-    .filter((c) => c.state === 'review' && c.due <= endOfToday)
+    .filter((c) => c.state === 'review' && c.due <= endOfToday && !c.ignored)
     .sort((a, b) => a.due - b.due)
     .slice(0, Math.max(0, settings.reviewLimit - counts.reviewsToday))
 
   const fresh = cards
-    .filter((c) => c.state === 'new')
+    .filter((c) => c.state === 'new' && !c.ignored)
     .sort((a, b) => a.pos - b.pos)
     .slice(0, Math.max(0, settings.newPerDay - counts.newToday))
 
@@ -268,6 +300,7 @@ export async function getSummary(now = Date.now()): Promise<Summary> {
   const endOfToday = startOfDay(now) + DAY_MS
   const summary: Summary = { fresh: 0, learning: 0, due: 0, known: 0 }
   for (const card of cards) {
+    if (card.ignored) continue
     if (card.state === 'new') summary.fresh++
     else if (card.state === 'learning' || card.state === 'relearning') summary.learning++
     else {
@@ -285,6 +318,23 @@ export interface KnownPool {
 }
 
 /**
+ * Ban ("Ignore") or un-ban a kanji (no log entry).
+ * `true`: an ignored card leaves every queue, pool and summary; if it was
+ * marked known, the flag is undone first (restoring the snapshotted state).
+ * `false`: the card returns to its normal state-based behavior.
+ */
+export async function markIgnored(
+  kanji: string,
+  ignored: boolean,
+): Promise<SrsCard | undefined> {
+  const card = await getCard(kanji)
+  if (!card) return undefined
+  const updated = ignored ? { ...undoKnown(card), ignored: true } : { ...card, ignored: false }
+  await putCard(updated)
+  return updated
+}
+
+/**
  * Kanji eligible for quiz pools — only "known" kanji (interval >= threshold
  * or manually marked). Read-only: never modifies cards or logs.
  */
@@ -293,7 +343,7 @@ export async function getKnownPool(): Promise<KnownPool> {
   const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
   return {
     kanji: cards
-      .filter((c) => c.known || c.interval >= settings.knownThresholdDays)
+      .filter((c) => (c.known || c.interval >= settings.knownThresholdDays) && !c.ignored)
       .sort((a, b) => a.pos - b.pos)
       .map((c) => c.kanji),
     thresholdDays: settings.knownThresholdDays,

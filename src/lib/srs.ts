@@ -18,6 +18,8 @@ export interface SrsCard {
   pos: number
   /** Manually marked as "known" (e.g. in the Deck). Included in quiz pools. */
   known: boolean
+  /** Ignored cards are excluded from session queues and summaries. */
+  ignored: boolean
   /** State before "mark as known"; restored when the mark is removed. */
   knownPrev?: KnownSnapshot | null
   state: CardState
@@ -60,6 +62,7 @@ export function createCard(kanji: string, pos: number, now: number): SrsCard {
     kanji,
     pos,
     known: false,
+    ignored: false,
     knownPrev: null,
     state: 'new',
     step: -1,

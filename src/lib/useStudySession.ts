@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { answerCard, getSessionQueue } from './db'
+import { answerCard, getSessionQueue, markIgnored } from './db'
 import type { Rating, SrsCard } from './srs'
 
 export type SessionKind = 'study' | 'review'
@@ -19,6 +19,7 @@ export interface StudySession {
   revealed: boolean
   reveal: () => void
   rate: (rating: Rating) => void
+  ignore: () => void
   finish: () => void
 }
 
@@ -88,6 +89,29 @@ export function useStudySession(kind: SessionKind): StudySession {
     [cards, loadQueue, status],
   )
 
+  /**
+   * Ban the current card ("Ignore") and move on. Not an answer: no log entry
+   * and no progress change — the card just leaves the queue.
+   */
+  const ignore = useCallback(
+    async () => {
+      if (busy.current || status !== 'ready') return
+      const current = cards[0]
+      if (!current) return
+      busy.current = true
+      try {
+        await markIgnored(current.kanji, true)
+        const next = await loadQueue()
+        setRevealed(false)
+        if (next.length === 0) setStatus('done')
+        else setCards(next)
+      } finally {
+        busy.current = false
+      }
+    },
+    [cards, loadQueue, status],
+  )
+
   return {
     status,
     current: cards[0] ?? null,
@@ -96,6 +120,7 @@ export function useStudySession(kind: SessionKind): StudySession {
     revealed,
     reveal,
     rate,
+    ignore,
     finish,
   }
 }

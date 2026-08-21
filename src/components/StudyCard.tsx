@@ -8,23 +8,27 @@ interface StudyCardProps {
   revealed: boolean
   onReveal: () => void
   onRate: (rating: Rating) => void
+  onIgnore: () => void
 }
 
-export function StudyCard({ entry, revealed, onReveal, onRate }: StudyCardProps) {
+export function StudyCard({ entry, revealed, onReveal, onRate, onIgnore }: StudyCardProps) {
   if (!revealed) {
     return (
       <div className="flex flex-col items-center gap-10 py-12">
         <div className="select-none text-[9rem] font-semibold leading-none sm:text-[11rem]">
           {entry.kanji}
         </div>
-        <button
-          type="button"
-          onClick={onReveal}
-          className="rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white shadow-md transition active:scale-95"
-        >
-          Show answer
-          <span className="ml-2 text-xs font-normal opacity-60">space / enter</span>
-        </button>
+        <div className="flex flex-col items-center gap-3">
+          <button
+            type="button"
+            onClick={onReveal}
+            className="rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white shadow-md transition active:scale-95"
+          >
+            Show answer
+            <span className="ml-2 text-xs font-normal opacity-60">space / enter</span>
+          </button>
+          <IgnoreButton onIgnore={onIgnore} />
+        </div>
       </div>
     )
   }
@@ -115,6 +119,22 @@ export function StudyCard({ entry, revealed, onReveal, onRate }: StudyCardProps)
       </div>
 
       <RatingButtons onRate={onRate} />
+
+      <div className="mt-2 flex justify-center">
+        <IgnoreButton onIgnore={onIgnore} />
+      </div>
     </div>
+  )
+}
+
+function IgnoreButton({ onIgnore }: { onIgnore: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onIgnore}
+      className="min-h-11 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-500 transition active:scale-95"
+    >
+      Ignore this kanji
+    </button>
   )
 }

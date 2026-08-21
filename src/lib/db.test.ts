@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   DB_NAME,
+  DB_VERSION,
   DEFAULT_SETTINGS,
   answerCard,
   closeDb,
@@ -15,6 +16,7 @@ import {
   getSessionQueue,
   getSettings,
   getSummary,
+  markIgnored,
   markKnown,
   putCard,
   resetProgress,
@@ -305,6 +307,101 @@ describe('known pool', () => {
   })
 })
 
+describe('markIgnored', () => {
+  it('excludes the card from queues, pool and summary until un-ignored', async () => {
+    await answerCard(KANJI_DATA[0].kanji, 'good', NOW)
+
+    const ignored = (await markIgnored(KANJI_DATA[0].kanji, true))!
+    expect(ignored.ignored).toBe(true)
+    expect(await getLogs()).toHaveLength(1)
+
+    expect(
+      (await getSessionQueue(NOW + MIN_MS)).learning.map((c) => c.kanji),
+    ).not.toContain(KANJI_DATA[0].kanji)
+
+    await markIgnored(KANJI_DATA[1].kanji, true)
+    expect((await getSessionQueue(NOW)).fresh.map((c) => c.kanji)).not.toContain(
+      KANJI_DATA[1].kanji,
+    )
+
+    const review = (await getCard(KANJI_DATA[2].kanji))!
+    review.state = 'review'
+    review.interval = 5
+    review.due = NOW - 60_000
+    await putCard(review)
+    await markIgnored(KANJI_DATA[2].kanji, true)
+    expect((await getSessionQueue(NOW)).review.map((c) => c.kanji)).not.toContain(
+      KANJI_DATA[2].kanji,
+    )
+
+    expect(await getKnownPool()).toEqual({
+      kanji: [],
+      thresholdDays: DEFAULT_SETTINGS.knownThresholdDays,
+    })
+
+    expect(await getSummary(NOW)).toEqual({
+      fresh: KANJI_DATA.length - 3,
+      learning: 0,
+      due: 0,
+      known: 0,
+    })
+
+    await markIgnored(KANJI_DATA[0].kanji, false)
+    expect(
+      (await getSessionQueue(NOW + MIN_MS)).learning.map((c) => c.kanji),
+    ).toContain(KANJI_DATA[0].kanji)
+  })
+
+  it('ignoring a known card clears known and restores the previous SRS state', async () => {
+    const card = (await getCard('一'))!
+    card.state = 'learning'
+    card.step = 1
+    card.due = NOW + MIN_MS
+    await putCard(card)
+
+    await markKnown('一', true, NOW)
+    const ignored = (await markIgnored('一', true))!
+    expect(ignored).toMatchObject({
+      ignored: true,
+      known: false,
+      state: 'learning',
+      step: 1,
+    })
+    expect(ignored.knownPrev).toBeNull()
+    expect(await getLogs()).toHaveLength(0)
+    expect((await getKnownPool()).kanji).not.toContain('一')
+
+    const restored = (await markIgnored('一', false))!
+    expect(restored).toEqual({ ...card, knownPrev: null })
+    expect((await getSessionQueue(NOW + MIN_MS)).learning.map((c) => c.kanji)).toContain('一')
+  })
+})
+
+describe('v1 → v2 migration', () => {
+  it('adds ignored: false and normalizes knownPrev on legacy cards', async () => {
+    closeDb()
+    await deleteDatabase()
+    const legacy = await openLegacyV1()
+    await rawPut(legacy, 'cards', {
+      kanji: '一',
+      pos: 0,
+      known: false,
+      state: 'new',
+      step: -1,
+      ease: STARTING_EASE,
+      interval: 0,
+      due: NOW,
+      reps: 0,
+      lapses: 0,
+    })
+    legacy.close()
+
+    const card = await getCard('一')
+    expect(card!.ignored).toBe(false)
+    expect(card!.knownPrev).toBeNull()
+  })
+})
+
 describe('persistence across reload', () => {
   it('survives closing the connection and reopening on a fresh load', async () => {
     await answerCard('一', 'good', NOW)
@@ -355,9 +452,41 @@ describe('session round-trip', () => {
 
 function openRawConnection(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1)
+    const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
+  })
+}
+
+function deleteDatabase(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(DB_NAME)
+    req.onsuccess = () => resolve(undefined)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+function openLegacyV1(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      db.createObjectStore('cards', { keyPath: 'kanji' })
+      const logStore = db.createObjectStore('log', { keyPath: 'id', autoIncrement: true })
+      logStore.createIndex('by-timestamp', 'timestamp')
+      db.createObjectStore('settings')
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+function rawPut(db: IDBDatabase, store: string, value: unknown): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite')
+    tx.objectStore(store).put(value)
+    tx.oncomplete = () => resolve(undefined)
+    tx.onerror = () => reject(tx.error)
   })
 }
 

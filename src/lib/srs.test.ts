@@ -25,6 +25,7 @@ function reviewCard(overrides: Partial<SrsCard> = {}): SrsCard {
     kanji: '一',
     pos: 0,
     known: false,
+    ignored: false,
     state: 'review',
     step: -1,
     ease: STARTING_EASE,
@@ -42,6 +43,7 @@ describe('createCard', () => {
     expect(c).toEqual({
       kanji: '一',
       pos: 3,
+      ignored: false,
       known: false,
       knownPrev: null,
       state: 'new',

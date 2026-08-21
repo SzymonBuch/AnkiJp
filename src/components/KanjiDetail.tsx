@@ -9,6 +9,7 @@ export interface KanjiDetailProps {
   card: SrsCard
   settings: Settings
   onToggleKnown: (known: boolean) => void
+  onToggleIgnored: (ignored: boolean) => void
   onClose: () => void
 }
 
@@ -20,7 +21,7 @@ const STATE_LABEL: Record<SrsCard['state'], string> = {
 }
 
 /** Full card details: every meaning and every example sentence plus SRS state. */
-export function KanjiDetail({ entry, card, settings, onToggleKnown, onClose }: KanjiDetailProps) {
+export function KanjiDetail({ entry, card, settings, onToggleKnown, onToggleIgnored, onClose }: KanjiDetailProps) {
   const meanings = entry.meanings.length > 0 && entry.meanings[0] !== entry.meaning
     ? entry.meanings
     : [entry.meaning]
@@ -36,17 +37,32 @@ export function KanjiDetail({ entry, card, settings, onToggleKnown, onClose }: K
           >
             ← Back to deck
           </button>
-          <button
-            type="button"
-            onClick={() => onToggleKnown(!card.known)}
-            className={`min-h-11 rounded-lg px-3 font-semibold transition active:scale-95 ${
-              card.known
-                ? 'bg-green-600 text-white shadow-md'
-                : 'border border-slate-300 bg-white text-slate-600'
-            }`}
-          >
-            {card.known ? '✓ Known' : 'Mark as known'}
-          </button>
+          <div className="flex gap-2">
+            {!card.ignored && (
+              <button
+                type="button"
+                onClick={() => onToggleKnown(!card.known)}
+                className={`min-h-11 rounded-lg px-3 font-semibold transition active:scale-95 ${
+                  card.known
+                    ? 'bg-green-600 text-white shadow-md'
+                    : 'border border-slate-300 bg-white text-slate-600'
+                }`}
+              >
+                {card.known ? '✓ Known' : 'Mark as known'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onToggleIgnored(!card.ignored)}
+              className={`min-h-11 rounded-lg px-3 font-semibold transition active:scale-95 ${
+                card.ignored
+                  ? 'bg-slate-400 text-slate-900 shadow-md'
+                  : 'border border-slate-300 bg-white text-slate-600'
+              }`}
+            >
+              {card.ignored ? '✓ Ignored' : 'Ignore'}
+            </button>
+          </div>
         </div>
 
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

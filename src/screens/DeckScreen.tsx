@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { KanjiDetail } from '../components/KanjiDetail'
-import { getAllCards, getCard, getSettings, markKnown, type Settings } from '../lib/db'
+import { getAllCards, getCard, getSettings, markIgnored, markKnown, type Settings } from '../lib/db'
 import { DAY_MS, type SrsCard } from '../lib/srs'
 import { getKanji } from '../lib/kanji'
 
-type Filter = 'all' | 'new' | 'learning' | 'due' | 'known'
+type Filter = 'all' | 'new' | 'learning' | 'due' | 'known' | 'ignored'
 type CardStatus = Exclude<Filter, 'all'> | 'scheduled'
 
 interface Row {
@@ -22,6 +22,7 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: 'learning', label: 'Learning' },
   { value: 'due', label: 'Due' },
   { value: 'known', label: 'Known' },
+  { value: 'ignored', label: 'Ignored' },
 ]
 
 const CELL_COLOR: Record<CardStatus, string> = {
@@ -30,6 +31,7 @@ const CELL_COLOR: Record<CardStatus, string> = {
   due: 'text-red-600',
   scheduled: 'text-slate-900',
   known: 'text-green-700',
+  ignored: 'text-slate-500',
 }
 
 export function DeckScreen({ onExit }: DeckScreenProps) {
@@ -56,8 +58,10 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
   const rows = useMemo<Row[]>(() => {
     if (!settings || now === 0) return []
     const endOfToday = startOfDay(now) + DAY_MS
-    return cards.map((card) => ({ card, status: cardStatus(card, settings, endOfToday) }))
-  }, [cards, settings, now])
+    return cards
+      .filter((card) => (filter === 'ignored' ? card.ignored : !card.ignored))
+      .map((card) => ({ card, status: cardStatus(card, settings, endOfToday) }))
+  }, [cards, settings, now, filter])
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -74,12 +78,21 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
     })
   }, [rows, filter, query])
 
-  const toggleKnown = async (kanji: string, known: boolean) => {
-    await markKnown(kanji, known)
+  const toggleCard = async (
+    kanji: string,
+    mutate: (kanji: string) => Promise<SrsCard | undefined>,
+  ) => {
+    await mutate(kanji)
     const updated = (await getCard(kanji)) ?? null
     setSelected(updated)
     setCards((prev) => prev.map((c) => (c.kanji === kanji ? (updated ?? c) : c)))
   }
+
+  const toggleKnown = (kanji: string, known: boolean) =>
+    toggleCard(kanji, (k) => markKnown(k, known))
+
+  const toggleIgnored = (kanji: string, ignored: boolean) =>
+    toggleCard(kanji, (k) => markIgnored(k, ignored))
 
   return (
     <div className="flex min-h-svh flex-col">
@@ -157,6 +170,7 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
           card={selected}
           settings={settings}
           onToggleKnown={(known) => toggleKnown(selected.kanji, known)}
+          onToggleIgnored={(ignored) => toggleIgnored(selected.kanji, ignored)}
           onClose={() => setSelected(null)}
         />
       )}
@@ -169,6 +183,7 @@ function cardStatus(
   settings: Settings,
   endOfToday: number,
 ): CardStatus {
+  if (card.ignored) return 'ignored'
   if (card.known || (card.state === 'review' && card.interval >= settings.knownThresholdDays)) {
     return 'known'
   }
