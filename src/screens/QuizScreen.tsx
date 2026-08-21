@@ -29,11 +29,6 @@ export function QuizScreen({ onExit }: { onExit: () => void }) {
         <div className="mx-auto flex max-w-xl items-center justify-between">
           <h1 className="text-lg font-semibold">Quiz</h1>
           <div className="flex items-center gap-3 text-sm text-slate-600">
-            {quiz.status === 'ready' && quiz.current && (
-              <span className="tabular-nums" data-testid="quiz-progress">
-                {quiz.answered} / {quiz.total}
-              </span>
-            )}
             <button
               type="button"
               onClick={onExit}
@@ -52,7 +47,7 @@ export function QuizScreen({ onExit }: { onExit: () => void }) {
         {quiz.status === 'ready' && quiz.current && (
           <QuizQuestionView
             question={quiz.current}
-            index={quiz.answered}
+            index={quiz.currentIndex}
             total={quiz.total}
             selection={quiz.selection}
             onSelect={quiz.select}

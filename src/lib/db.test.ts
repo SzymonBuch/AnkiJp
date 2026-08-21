@@ -21,7 +21,7 @@ import {
   setSettings,
 } from './db'
 import { KANJI_DATA } from './kanji'
-import { DAY_MS, MIN_MS, rateCard } from './srs'
+import { DAY_MS, MIN_MS, STARTING_EASE, rateCard } from './srs'
 
 const NOW = new Date('2026-08-20T12:00:00Z').getTime()
 
@@ -227,11 +227,73 @@ describe('known pool', () => {
     expect((await getKnownPool()).kanji).not.toContain(KANJI_DATA[3].kanji)
   })
 
-  it('markKnown only toggles the flag — SRS state and logs untouched', async () => {
-    const updated = await markKnown('一', true)
-    expect(updated).toMatchObject({ known: true, state: 'new', reps: 0, interval: 0 })
+  it('markKnown jumps the card to review at/over the threshold and writes no log', async () => {
+    const card = (await getCard('一'))!
+    card.state = 'learning'
+    card.step = 1
+    card.due = NOW + MIN_MS
+    await putCard(card)
+
+    const updated = (await markKnown('一', true, NOW))!
+    expect(updated).toMatchObject({
+      known: true,
+      state: 'review',
+      step: -1,
+      interval: DEFAULT_SETTINGS.knownThresholdDays,
+      due: NOW + DEFAULT_SETTINGS.knownThresholdDays * DAY_MS,
+    })
+    expect(updated.knownPrev).toEqual({
+      state: 'learning',
+      step: 1,
+      ease: STARTING_EASE,
+      interval: 0,
+      due: NOW + MIN_MS,
+      reps: 0,
+      lapses: 0,
+    })
     expect(await getLogs()).toHaveLength(0)
-    expect(await markKnown('一', false)).toMatchObject({ known: false })
+  })
+
+  it('re-marking a known card keeps the original snapshot', async () => {
+    const card = (await getCard('一'))!
+    card.state = 'learning'
+    card.step = 1
+    card.due = NOW + MIN_MS
+    await putCard(card)
+
+    const first = (await markKnown('一', true, NOW))!
+    const again = (await markKnown('一', true, NOW))!
+    expect(again).toEqual(first)
+  })
+
+  it('un-marking restores the exact previous SRS state', async () => {
+    const card = (await getCard('一'))!
+    card.state = 'learning'
+    card.step = 1
+    card.due = NOW + MIN_MS
+    await putCard(card)
+
+    await markKnown('一', true, NOW)
+    const restored = (await markKnown('一', false, NOW))!
+    expect(restored).toEqual({ ...card, knownPrev: null })
+    expect(restored.state).toBe('learning')
+    expect(restored.step).toBe(1)
+    expect(await getLogs()).toHaveLength(0)
+
+    expect((await getSessionQueue(NOW + MIN_MS)).learning.map((c) => c.kanji)).toContain('一')
+  })
+
+  it('a marked-known card leaves the session queues and counts as known, not fresh', async () => {
+    await markKnown('一', true, NOW)
+
+    const q = await getSessionQueue(NOW)
+    expect(q.fresh.map((c) => c.kanji)).not.toContain('一')
+    expect(q.review.map((c) => c.kanji)).not.toContain('一')
+    expect((await getKnownPool()).kanji).toContain('一')
+
+    const summary = await getSummary(NOW)
+    expect(summary.fresh).toBe(KANJI_DATA.length - 1)
+    expect(summary.known).toBe(1)
   })
 
   it('is read-only: repeated calls never change cards or write logs', async () => {

@@ -1,5 +1,5 @@
 import { openDB, type IDBPDatabase, type DBSchema } from 'idb'
-import { createCard, DAY_MS, rateCard, type CardState, type Rating, type SrsCard } from './srs'
+import { createCard, DAY_MS, rateCard, type CardState, type KnownSnapshot, type Rating, type SrsCard } from './srs'
 import { KANJI_DATA } from './kanji'
 
 export const DB_NAME = 'ankijp'
@@ -207,13 +207,51 @@ export async function resetProgress(): Promise<void> {
   await ensureSeeded()
 }
 
-/** Manually flag a card as "known" (does not touch the SRS state or logs). */
-export async function markKnown(kanji: string, known: boolean): Promise<SrsCard | undefined> {
+/**
+ * Manually flag a card as "known" (no log entry).
+ * `true`: snapshot the current SRS state, then jump to review at/over the known
+ * threshold. Re-marking an already-known card never overwrites the snapshot.
+ * `false`: restore the snapshotted state (legacy cards without one just lose the flag).
+ */
+export async function markKnown(
+  kanji: string,
+  known: boolean,
+  now = Date.now(),
+): Promise<SrsCard | undefined> {
   const card = await getCard(kanji)
   if (!card) return undefined
-  const updated = { ...card, known }
+  const updated = known ? await applyKnown(card, now) : undoKnown(card)
   await putCard(updated)
   return updated
+}
+
+async function applyKnown(card: SrsCard, now: number): Promise<SrsCard> {
+  if (card.known && card.knownPrev) return { ...card }
+  const { knownThresholdDays } = await getSettings()
+  const snapshot: KnownSnapshot = {
+    state: card.state,
+    step: card.step,
+    ease: card.ease,
+    interval: card.interval,
+    due: card.due,
+    reps: card.reps,
+    lapses: card.lapses,
+  }
+  const interval = Math.max(card.interval, knownThresholdDays)
+  return {
+    ...card,
+    known: true,
+    knownPrev: snapshot,
+    state: 'review',
+    step: -1,
+    interval,
+    due: now + interval * DAY_MS,
+  }
+}
+
+function undoKnown(card: SrsCard): SrsCard {
+  if (!card.knownPrev) return { ...card, known: false }
+  return { ...card, ...card.knownPrev, known: false, knownPrev: null }
 }
 
 export interface Summary {

@@ -43,6 +43,7 @@ describe('createCard', () => {
       kanji: '一',
       pos: 3,
       known: false,
+      knownPrev: null,
       state: 'new',
       step: -1,
       ease: STARTING_EASE,

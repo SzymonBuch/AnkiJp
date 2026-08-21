@@ -43,9 +43,6 @@ export function QuizQuestionView({
         >
           {question.prompt}
         </div>
-        {isReverse && (
-          <div className="text-2xl font-semibold text-slate-800">{question.kanji}</div>
-        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
