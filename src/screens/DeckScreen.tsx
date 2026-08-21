@@ -37,12 +37,12 @@ const FILTERS: { value: Filter; label: string }[] = [
 ]
 
 const CELL_COLOR: Record<CardStatus, string> = {
-  new: 'text-slate-400',
-  learning: 'text-amber-600',
-  due: 'text-red-600',
-  scheduled: 'text-slate-900',
-  known: 'text-green-700',
-  ignored: 'text-slate-500',
+  new: 'text-slate-400 dark:text-slate-500',
+  learning: 'text-amber-600 dark:text-amber-400',
+  due: 'text-red-600 dark:text-red-400',
+  scheduled: 'text-slate-900 dark:text-slate-100',
+  known: 'text-green-700 dark:text-green-400',
+  ignored: 'text-slate-500 dark:text-slate-400',
 }
 
 export function DeckScreen({ onExit }: DeckScreenProps) {
@@ -129,18 +129,18 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
 
   return (
     <div className="flex min-h-svh flex-col">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold">Deck</h1>
-            <div className="flex items-center gap-3 text-sm text-slate-600">
+            <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
               <span className="tabular-nums" data-testid="deck-count">
                 {visible.length} / {rows.length}
               </span>
               <button
                 type="button"
                 onClick={onExit}
-                className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95"
+                className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:text-slate-300"
               >
                 Exit
               </button>
@@ -153,7 +153,7 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search kanji, meaning or reading…"
             aria-label="Search kanji"
-            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-slate-400 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-500"
           />
 
           <div className="flex flex-wrap gap-2">
@@ -164,8 +164,8 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
                 onClick={() => setFilter(value)}
                 className={`min-h-11 rounded-full px-4 text-sm font-medium transition active:scale-95 ${
                   filter === value
-                    ? 'bg-slate-800 text-white shadow-sm'
-                    : 'border border-slate-300 bg-white text-slate-600'
+                    ? 'bg-slate-800 text-white shadow-sm dark:bg-slate-100 dark:text-slate-900'
+                    : 'border border-slate-300 bg-white text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300'
                 }`}
               >
                 {label}
@@ -177,9 +177,9 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
 
       <main className="mx-auto w-full max-w-3xl flex-1 p-4">
         {cards.length === 0 ? (
-          <p className="py-12 text-center text-slate-500">Loading…</p>
+          <p className="py-12 text-center text-slate-500 dark:text-slate-400">Loading…</p>
         ) : visible.length === 0 ? (
-          <p className="py-12 text-center text-slate-500">No kanji match this filter.</p>
+          <p className="py-12 text-center text-slate-500 dark:text-slate-400">No kanji match this filter.</p>
         ) : (
           <div className="grid grid-cols-5 gap-2 sm:grid-cols-7 md:grid-cols-10 lg:grid-cols-12">
             {visible.map(({ card, status }) => (
@@ -188,7 +188,7 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
                 type="button"
                 onClick={() => setSelected(card)}
                 aria-label={`${card.kanji} — ${status}`}
-                className={`flex aspect-square min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-2xl font-semibold shadow-sm transition active:scale-90 sm:text-3xl ${CELL_COLOR[status]}`}
+                className={`flex aspect-square min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-2xl font-semibold shadow-sm transition active:scale-90 sm:text-3xl dark:border-slate-700 dark:bg-slate-900 ${CELL_COLOR[status]}`}
               >
                 {card.kanji}
               </button>

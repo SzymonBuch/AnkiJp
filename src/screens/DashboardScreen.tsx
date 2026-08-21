@@ -34,27 +34,27 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
   }, [])
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-slate-100 p-6 text-slate-900">
+    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-slate-100 p-6 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <div className="flex h-24 w-24 items-center justify-center rounded-2xl bg-[#be1428] text-6xl font-bold text-white shadow-lg">
         安
       </div>
       <div className="text-center">
         <h1 className="text-3xl font-semibold">AnkiJp</h1>
-        <p className="mt-2 text-slate-600">
+        <p className="mt-2 text-slate-600 dark:text-slate-300">
           Learn all 1,006 joyo kanji with Anki-style SRS and quizzes.
         </p>
       </div>
 
       {summary && (
         <div className="grid w-full max-w-sm grid-cols-4 gap-2 text-center">
-          <Counter label="New" value={summary.fresh} accent="text-slate-700" />
-          <Counter label="Learning" value={summary.learning} accent="text-amber-600" />
-          <Counter label="Due" value={summary.due} accent="text-red-600" />
-          <div className="rounded-xl border border-slate-200 bg-white px-1 py-2.5 shadow-sm">
-            <div className="text-2xl font-bold tabular-nums text-green-700" data-testid="dashboard-streak">
+          <Counter label="New" value={summary.fresh} accent="text-slate-700 dark:text-slate-300" />
+          <Counter label="Learning" value={summary.learning} accent="text-amber-600 dark:text-amber-400" />
+          <Counter label="Due" value={summary.due} accent="text-red-600 dark:text-red-400" />
+          <div className="rounded-xl border border-slate-200 bg-white px-1 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <div className="text-2xl font-bold tabular-nums text-green-700 dark:text-green-400" data-testid="dashboard-streak">
               {streak}
             </div>
-            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
               Day streak
             </div>
           </div>
@@ -67,10 +67,10 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
             key={screen}
             type="button"
             onClick={() => onNavigate(screen)}
-            className="flex items-center justify-between rounded-xl border border-slate-300 bg-white px-5 py-3 text-left shadow-sm transition active:scale-95"
+            className="flex items-center justify-between rounded-xl border border-slate-300 bg-white px-5 py-3 text-left shadow-sm transition active:scale-95 dark:border-slate-600 dark:bg-slate-900"
           >
-            <span className="font-semibold text-slate-700">{label}</span>
-            <span className="text-sm text-slate-400">{description}</span>
+            <span className="font-semibold text-slate-700 dark:text-slate-300">{label}</span>
+            <span className="text-sm text-slate-400 dark:text-slate-500">{description}</span>
           </button>
         ))}
       </div>
@@ -82,16 +82,16 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
 
 function Counter({ label, value, accent }: { label: string; value: number; accent: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-1 py-2.5 shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white px-1 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <div className={`text-2xl font-bold tabular-nums ${accent}`}>{value}</div>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
     </div>
   )
 }
 
 function Attribution() {
   return (
-    <details className="mt-2 text-center text-xs text-slate-400">
+    <details className="mt-2 text-center text-xs text-slate-400 dark:text-slate-500">
       <summary className="cursor-pointer select-none">Data sources &amp; attribution</summary>
       <p className="mt-1">
         Kanji readings, meanings and grades by{' '}

@@ -29,7 +29,7 @@ function parseRuby(inner: string, key: number): ReactNode {
   return (
     <ruby key={key}>
       {inner.slice(0, rtStart)}
-      <rt className="text-[0.55em] text-slate-500">{inner.slice(rtStart + 4, rtEnd)}</rt>
+      <rt className="text-[0.55em] text-slate-500 dark:text-slate-400">{inner.slice(rtStart + 4, rtEnd)}</rt>
     </ruby>
   )
 }

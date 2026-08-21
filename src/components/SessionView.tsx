@@ -55,10 +55,10 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
 
   return (
     <div className="flex min-h-svh flex-col">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
         <div className="mx-auto flex max-w-xl items-center justify-between">
           <h1 className="text-lg font-semibold">{title}</h1>
-          <div className="flex items-center gap-3 text-sm text-slate-600">
+          <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
             {status === 'ready' && (
               <span data-testid="session-progress" className="tabular-nums">
                 {session.remaining} left
@@ -67,7 +67,7 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
             <button
               type="button"
               onClick={session.finish}
-              className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95"
+              className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:text-slate-300"
             >
               End session
             </button>
@@ -76,7 +76,7 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
       </header>
 
       <main className="mx-auto w-full max-w-xl flex-1 p-4">
-        {status === 'loading' && <p className="py-12 text-center text-slate-500">Loading…</p>}
+        {status === 'loading' && <p className="py-12 text-center text-slate-500 dark:text-slate-400">Loading…</p>}
         {status === 'ready' && session.current && (
           <StudyCard
             entry={getKanji(session.current.kanji)}
@@ -113,22 +113,22 @@ function Summary({
       {empty ? (
         <>
           <h2 className="text-2xl font-semibold">All caught up!</h2>
-          <p className="text-slate-600">No cards to study right now.</p>
+          <p className="text-slate-600 dark:text-slate-300">No cards to study right now.</p>
         </>
       ) : (
         <>
           <h2 className="text-2xl font-semibold">Session complete</h2>
-          <p className="text-slate-600">
-            <span className="font-semibold text-slate-900">{progress.newCards}</span> new ·{' '}
-            <span className="font-semibold text-slate-900">{progress.reviewCards}</span>{' '}
-            reviews · <span className="font-semibold text-slate-900">{progress.total}</span> total
+          <p className="text-slate-600 dark:text-slate-300">
+            <span className="font-semibold text-slate-900 dark:text-slate-100">{progress.newCards}</span> new ·{' '}
+            <span className="font-semibold text-slate-900 dark:text-slate-100">{progress.reviewCards}</span>{' '}
+            reviews · <span className="font-semibold text-slate-900 dark:text-slate-100">{progress.total}</span> total
           </p>
         </>
       )}
       <button
         type="button"
         onClick={onExit}
-        className="rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white shadow-md transition active:scale-95"
+        className="rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white shadow-md transition active:scale-95 dark:bg-slate-100 dark:text-slate-900"
       >
         Done
       </button>

@@ -134,7 +134,7 @@ export function DrawingPad({ kanji, initial, onSave, onClose }: DrawingPadProps)
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-100/95 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-100/95 backdrop-blur-sm dark:bg-slate-950/95">
       <div className="mx-auto flex min-h-full w-full max-w-xl flex-col items-center gap-4 p-4">
         <div className="flex w-full items-center justify-between">
           <h2 className="text-lg font-semibold">
@@ -143,13 +143,13 @@ export function DrawingPad({ kanji, initial, onSave, onClose }: DrawingPadProps)
           <button
             type="button"
             onClick={onClose}
-            className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 font-medium text-slate-600 transition active:scale-95"
+            className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
           >
             Close
           </button>
         </div>
 
-        <div className="flex w-full flex-wrap items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex w-full flex-wrap items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           {COLORS.map((value) => (
             <button
               key={value}
@@ -161,7 +161,7 @@ export function DrawingPad({ kanji, initial, onSave, onClose }: DrawingPadProps)
                 setEraser(false)
               }}
               className={`h-9 w-9 rounded-full border-2 transition active:scale-90 ${
-                !eraser && color === value ? 'scale-110 border-slate-800' : 'border-transparent'
+                !eraser && color === value ? 'scale-110 border-slate-800 dark:border-slate-200' : 'border-transparent'
               }`}
               style={{ backgroundColor: value }}
             />
@@ -172,8 +172,8 @@ export function DrawingPad({ kanji, initial, onSave, onClose }: DrawingPadProps)
             aria-pressed={eraser}
             className={`min-h-11 rounded-lg px-3 text-sm font-medium transition active:scale-95 ${
               eraser
-                ? 'bg-slate-800 text-white shadow-md'
-                : 'border border-slate-300 bg-white text-slate-600'
+                ? 'bg-slate-800 text-white shadow-md dark:bg-slate-100 dark:text-slate-900'
+                : 'border border-slate-300 bg-white text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300'
             }`}
           >
             Eraser
@@ -182,14 +182,14 @@ export function DrawingPad({ kanji, initial, onSave, onClose }: DrawingPadProps)
             type="button"
             onClick={undo}
             disabled={!canUndo}
-            className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-600 transition active:scale-95 disabled:opacity-40"
+            className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-600 transition active:scale-95 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
           >
             Undo
           </button>
           <button
             type="button"
             onClick={clear}
-            className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-600 transition active:scale-95"
+            className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
           >
             Clear
           </button>
@@ -204,13 +204,13 @@ export function DrawingPad({ kanji, initial, onSave, onClose }: DrawingPadProps)
           onPointerMove={onPointerMove}
           onPointerUp={endStroke}
           onPointerCancel={endStroke}
-          className="touch-none rounded-xl border border-slate-300 bg-white shadow-md"
+          className="touch-none rounded-xl border border-slate-300 bg-white shadow-md dark:border-slate-600"
         />
 
         <button
           type="button"
           onClick={save}
-          className="w-full rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white shadow-md transition active:scale-95"
+          className="w-full rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white shadow-md transition active:scale-95 dark:bg-slate-100 dark:text-slate-900"
         >
           Save drawing
         </button>
