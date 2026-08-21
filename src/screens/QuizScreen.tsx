@@ -25,19 +25,14 @@ export function QuizScreen({ onExit }: { onExit: () => void }) {
 
   return (
     <div className="flex min-h-svh flex-col">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
         <div className="mx-auto flex max-w-xl items-center justify-between">
           <h1 className="text-lg font-semibold">Quiz</h1>
-          <div className="flex items-center gap-3 text-sm text-slate-600">
-            {quiz.status === 'ready' && quiz.current && (
-              <span className="tabular-nums" data-testid="quiz-progress">
-                {quiz.answered} / {quiz.total}
-              </span>
-            )}
+          <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
             <button
               type="button"
               onClick={onExit}
-              className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95"
+              className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:text-slate-300"
             >
               End session
             </button>
@@ -46,13 +41,13 @@ export function QuizScreen({ onExit }: { onExit: () => void }) {
       </header>
 
       <main className="mx-auto w-full max-w-xl flex-1 p-4">
-        {quiz.status === 'loading' && <p className="py-12 text-center text-slate-500">Loading…</p>}
+        {quiz.status === 'loading' && <p className="py-12 text-center text-slate-500 dark:text-slate-400">Loading…</p>}
         {quiz.status === 'empty' && <EmptyState onExit={onExit} />}
         {quiz.status === 'setup' && <QuizSetup poolCount={quiz.poolCount} onStart={quiz.start} />}
         {quiz.status === 'ready' && quiz.current && (
           <QuizQuestionView
             question={quiz.current}
-            index={quiz.answered}
+            index={quiz.currentIndex}
             total={quiz.total}
             selection={quiz.selection}
             onSelect={quiz.select}
@@ -78,14 +73,14 @@ function EmptyState({ onExit }: { onExit: () => void }) {
   return (
     <div className="flex flex-col items-center gap-6 py-16 text-center">
       <h2 className="text-2xl font-semibold">No known kanji yet</h2>
-      <p className="max-w-sm text-slate-600">
+      <p className="max-w-sm text-slate-600 dark:text-slate-300">
         Quizzes only include kanji you already know. Keep studying until cards reach the known
         interval, or mark them as known from the Deck.
       </p>
       <button
         type="button"
         onClick={onExit}
-        className="rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white shadow-md transition active:scale-95"
+        className="rounded-xl bg-slate-800 px-6 py-3 font-semibold text-white shadow-md transition active:scale-95 dark:bg-slate-100 dark:text-slate-900"
       >
         Done
       </button>

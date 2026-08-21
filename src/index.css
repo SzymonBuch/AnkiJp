@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+.dark {
+  color-scheme: dark;
+}
+
 :root {
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -16,6 +22,11 @@ body,
 body {
   margin: 0;
   overscroll-behavior-y: none;
+  background-color: #f1f5f9;
+}
+
+.dark body {
+  background-color: #020617;
 }
 
 button {

@@ -17,6 +17,7 @@ export interface QuizSession {
   poolCount: number
   questions: QuizQuestion[]
   current: QuizQuestion | null
+  currentIndex: number
   total: number
   answered: number
   correctCount: number
@@ -113,6 +114,7 @@ export function useQuizSession(): QuizSession {
     poolCount,
     questions,
     current: questions[currentIndex] ?? null,
+    currentIndex,
     total: questions.length,
     answered: answers.length,
     correctCount,

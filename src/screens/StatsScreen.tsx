@@ -22,13 +22,13 @@ export function StatsScreen({ onExit }: StatsScreenProps) {
 
   return (
     <div className="flex min-h-svh flex-col">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
         <div className="mx-auto flex max-w-2xl items-center justify-between">
           <h1 className="text-lg font-semibold">Statistics</h1>
           <button
             type="button"
             onClick={onExit}
-            className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95"
+            className="min-h-11 rounded-lg border border-slate-300 px-3 font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:text-slate-300"
           >
             Exit
           </button>
@@ -37,9 +37,9 @@ export function StatsScreen({ onExit }: StatsScreenProps) {
 
       <main className="mx-auto w-full max-w-2xl flex-1 p-4">
         {!stats ? (
-          <p className="py-12 text-center text-slate-500">Loading…</p>
+          <p className="py-12 text-center text-slate-500 dark:text-slate-400">Loading…</p>
         ) : stats.totalAnswers === 0 ? (
-          <p className="py-16 text-center text-slate-500">
+          <p className="py-16 text-center text-slate-500 dark:text-slate-400">
             No reviews yet. Study a few cards to see statistics here.
           </p>
         ) : (
@@ -57,24 +57,24 @@ export function StatsScreen({ onExit }: StatsScreenProps) {
             </div>
 
             <section>
-              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Reviews per day
               </h2>
-              <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
                 {[...stats.daily].reverse().map((day) => (
                   <div key={day.date} className="flex items-center gap-3">
-                    <span className="w-24 shrink-0 text-xs tabular-nums text-slate-500">
+                    <span className="w-24 shrink-0 text-xs tabular-nums text-slate-500 dark:text-slate-400">
                       {day.date}
                     </span>
-                    <div className="h-6 flex-1 overflow-hidden rounded-md bg-slate-100">
+                    <div className="h-6 flex-1 overflow-hidden rounded-md bg-slate-100 dark:bg-slate-800">
                       <div
-                        className="flex h-full items-center rounded-md bg-slate-800 px-2 text-[10px] font-semibold tabular-nums text-white"
+                        className="flex h-full items-center rounded-md bg-slate-800 px-2 text-[10px] font-semibold tabular-nums text-white dark:bg-slate-300 dark:text-slate-900"
                         style={{ width: `${barWidth(day.answers, stats)}%` }}
                       >
                         {day.answers}
                       </div>
                     </div>
-                    <span className="w-16 shrink-0 text-right text-xs tabular-nums text-slate-400">
+                    <span className="w-16 shrink-0 text-right text-xs tabular-nums text-slate-400 dark:text-slate-500">
                       {day.newCards} new · {day.reviews} rev
                     </span>
                   </div>
@@ -90,9 +90,9 @@ export function StatsScreen({ onExit }: StatsScreenProps) {
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center shadow-sm">
-      <div className="text-2xl font-bold tabular-nums text-slate-900">{value}</div>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <div className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-100">{value}</div>
+      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
     </div>
   )
 }

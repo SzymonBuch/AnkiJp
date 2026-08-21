@@ -1,4 +1,4 @@
-import type { Rating } from '../lib/srs'
+import { ratingOutcome, type Rating, type SrsCard } from '../lib/srs'
 
 const RATINGS: { value: Rating; label: string; shortcut: string; color: string }[] = [
   { value: 'again', label: 'Again', shortcut: '1', color: '#e04848' },
@@ -8,11 +8,13 @@ const RATINGS: { value: Rating; label: string; shortcut: string; color: string }
 ]
 
 interface RatingButtonsProps {
+  /** Current card — when given, each button shows what the rating would do. */
+  card?: SrsCard | null
   disabled?: boolean
   onRate: (rating: Rating) => void
 }
 
-export function RatingButtons({ disabled, onRate }: RatingButtonsProps) {
+export function RatingButtons({ card, disabled, onRate }: RatingButtonsProps) {
   return (
     <div className="grid grid-cols-4 gap-2">
       {RATINGS.map((rating) => (
@@ -25,6 +27,11 @@ export function RatingButtons({ disabled, onRate }: RatingButtonsProps) {
           className="rounded-xl px-2 py-3 text-white shadow-md transition active:scale-95 disabled:opacity-50"
         >
           <span className="block text-sm font-bold leading-tight sm:text-base">{rating.label}</span>
+          {card && (
+            <span className="block text-[11px] leading-tight opacity-90">
+              {ratingOutcome(card, rating.value)}
+            </span>
+          )}
           <span className="block text-xs opacity-75">{rating.shortcut}</span>
         </button>
       ))}

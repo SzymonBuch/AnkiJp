@@ -3,25 +3,32 @@ import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   DB_NAME,
+  DB_VERSION,
   DEFAULT_SETTINGS,
   answerCard,
+  clearDrawings,
   closeDb,
+  deleteDrawing,
   ensureSeeded,
   getAllCards,
+  getAllDrawings,
   getCard,
   getDailyCounts,
+  getDrawing,
   getKnownPool,
   getLogs,
   getSessionQueue,
   getSettings,
   getSummary,
+  markIgnored,
   markKnown,
   putCard,
+  putDrawing,
   resetProgress,
   setSettings,
 } from './db'
 import { KANJI_DATA } from './kanji'
-import { DAY_MS, MIN_MS, rateCard } from './srs'
+import { DAY_MS, MIN_MS, STARTING_EASE, rateCard } from './srs'
 
 const NOW = new Date('2026-08-20T12:00:00Z').getTime()
 
@@ -189,6 +196,47 @@ describe('summary', () => {
     expect(summary.known).toBe(1)
     expect(summary.due).toBe(0)
   })
+
+  it('counts future reviews: graduated, not due today, below the known threshold', async () => {
+    await setSettings({ knownThresholdDays: 21 })
+
+    // In the pipeline: graduated, due beyond today, interval below the threshold.
+    const future = (await getCard(KANJI_DATA[0].kanji))!
+    future.state = 'review'
+    future.interval = 5
+    future.due = NOW + 3 * DAY_MS
+    await putCard(future)
+
+    // Due today -> counts as due, not future.
+    const due = (await getCard(KANJI_DATA[1].kanji))!
+    due.state = 'review'
+    due.interval = 5
+    due.due = NOW - 60_000
+    await putCard(due)
+
+    // At/over the threshold -> counts as known, not future.
+    const matured = (await getCard(KANJI_DATA[2].kanji))!
+    matured.state = 'review'
+    matured.interval = 21
+    matured.due = NOW + 30 * DAY_MS
+    await putCard(matured)
+
+    // Manually marked known -> never future.
+    const marked = (await getCard(KANJI_DATA[3].kanji))!
+    marked.state = 'review'
+    marked.interval = 5
+    marked.due = NOW + 30 * DAY_MS
+    marked.known = true
+    await putCard(marked)
+
+    expect(await getSummary(NOW)).toMatchObject({
+      fresh: KANJI_DATA.length - 4,
+      learning: 0,
+      due: 1,
+      known: 2,
+      future: 1,
+    })
+  })
 })
 
 describe('known pool', () => {
@@ -227,11 +275,73 @@ describe('known pool', () => {
     expect((await getKnownPool()).kanji).not.toContain(KANJI_DATA[3].kanji)
   })
 
-  it('markKnown only toggles the flag — SRS state and logs untouched', async () => {
-    const updated = await markKnown('一', true)
-    expect(updated).toMatchObject({ known: true, state: 'new', reps: 0, interval: 0 })
+  it('markKnown jumps the card to review at/over the threshold and writes no log', async () => {
+    const card = (await getCard('一'))!
+    card.state = 'learning'
+    card.step = 1
+    card.due = NOW + MIN_MS
+    await putCard(card)
+
+    const updated = (await markKnown('一', true, NOW))!
+    expect(updated).toMatchObject({
+      known: true,
+      state: 'review',
+      step: -1,
+      interval: DEFAULT_SETTINGS.knownThresholdDays,
+      due: NOW + DEFAULT_SETTINGS.knownThresholdDays * DAY_MS,
+    })
+    expect(updated.knownPrev).toEqual({
+      state: 'learning',
+      step: 1,
+      ease: STARTING_EASE,
+      interval: 0,
+      due: NOW + MIN_MS,
+      reps: 0,
+      lapses: 0,
+    })
     expect(await getLogs()).toHaveLength(0)
-    expect(await markKnown('一', false)).toMatchObject({ known: false })
+  })
+
+  it('re-marking a known card keeps the original snapshot', async () => {
+    const card = (await getCard('一'))!
+    card.state = 'learning'
+    card.step = 1
+    card.due = NOW + MIN_MS
+    await putCard(card)
+
+    const first = (await markKnown('一', true, NOW))!
+    const again = (await markKnown('一', true, NOW))!
+    expect(again).toEqual(first)
+  })
+
+  it('un-marking restores the exact previous SRS state', async () => {
+    const card = (await getCard('一'))!
+    card.state = 'learning'
+    card.step = 1
+    card.due = NOW + MIN_MS
+    await putCard(card)
+
+    await markKnown('一', true, NOW)
+    const restored = (await markKnown('一', false, NOW))!
+    expect(restored).toEqual({ ...card, knownPrev: null })
+    expect(restored.state).toBe('learning')
+    expect(restored.step).toBe(1)
+    expect(await getLogs()).toHaveLength(0)
+
+    expect((await getSessionQueue(NOW + MIN_MS)).learning.map((c) => c.kanji)).toContain('一')
+  })
+
+  it('a marked-known card leaves the session queues and counts as known, not fresh', async () => {
+    await markKnown('一', true, NOW)
+
+    const q = await getSessionQueue(NOW)
+    expect(q.fresh.map((c) => c.kanji)).not.toContain('一')
+    expect(q.review.map((c) => c.kanji)).not.toContain('一')
+    expect((await getKnownPool()).kanji).toContain('一')
+
+    const summary = await getSummary(NOW)
+    expect(summary.fresh).toBe(KANJI_DATA.length - 1)
+    expect(summary.known).toBe(1)
   })
 
   it('is read-only: repeated calls never change cards or write logs', async () => {
@@ -240,6 +350,144 @@ describe('known pool', () => {
     expect(await getLogs()).toHaveLength(0)
     expect(await getAllCards()).toHaveLength(KANJI_DATA.length)
     expect(await getCard(KANJI_DATA[0].kanji)).toMatchObject({ state: 'new', reps: 0, known: false })
+  })
+})
+
+describe('markIgnored', () => {
+  it('excludes the card from queues, pool and summary until un-ignored', async () => {
+    await answerCard(KANJI_DATA[0].kanji, 'good', NOW)
+
+    const ignored = (await markIgnored(KANJI_DATA[0].kanji, true))!
+    expect(ignored.ignored).toBe(true)
+    expect(await getLogs()).toHaveLength(1)
+
+    expect(
+      (await getSessionQueue(NOW + MIN_MS)).learning.map((c) => c.kanji),
+    ).not.toContain(KANJI_DATA[0].kanji)
+
+    await markIgnored(KANJI_DATA[1].kanji, true)
+    expect((await getSessionQueue(NOW)).fresh.map((c) => c.kanji)).not.toContain(
+      KANJI_DATA[1].kanji,
+    )
+
+    const review = (await getCard(KANJI_DATA[2].kanji))!
+    review.state = 'review'
+    review.interval = 5
+    review.due = NOW - 60_000
+    await putCard(review)
+    await markIgnored(KANJI_DATA[2].kanji, true)
+    expect((await getSessionQueue(NOW)).review.map((c) => c.kanji)).not.toContain(
+      KANJI_DATA[2].kanji,
+    )
+
+    expect(await getKnownPool()).toEqual({
+      kanji: [],
+      thresholdDays: DEFAULT_SETTINGS.knownThresholdDays,
+    })
+
+    expect(await getSummary(NOW)).toEqual({
+      fresh: KANJI_DATA.length - 3,
+      learning: 0,
+      due: 0,
+      known: 0,
+      future: 0,
+    })
+
+    await markIgnored(KANJI_DATA[0].kanji, false)
+    expect(
+      (await getSessionQueue(NOW + MIN_MS)).learning.map((c) => c.kanji),
+    ).toContain(KANJI_DATA[0].kanji)
+  })
+
+  it('ignoring a known card clears known and restores the previous SRS state', async () => {
+    const card = (await getCard('一'))!
+    card.state = 'learning'
+    card.step = 1
+    card.due = NOW + MIN_MS
+    await putCard(card)
+
+    await markKnown('一', true, NOW)
+    const ignored = (await markIgnored('一', true))!
+    expect(ignored).toMatchObject({
+      ignored: true,
+      known: false,
+      state: 'learning',
+      step: 1,
+    })
+    expect(ignored.knownPrev).toBeNull()
+    expect(await getLogs()).toHaveLength(0)
+    expect((await getKnownPool()).kanji).not.toContain('一')
+
+    const restored = (await markIgnored('一', false))!
+    expect(restored).toEqual({ ...card, knownPrev: null })
+    expect((await getSessionQueue(NOW + MIN_MS)).learning.map((c) => c.kanji)).toContain('一')
+  })
+})
+
+describe('drawings', () => {
+  const A = { kanji: '一', dataUrl: 'data:image/png;base64,AAA', updatedAt: NOW }
+  const B = { kanji: '二', dataUrl: 'data:image/png;base64,BBB', updatedAt: NOW }
+
+  it('puts, gets, updates, lists and deletes drawings', async () => {
+    expect(await getDrawing('一')).toBeUndefined()
+    expect(await getAllDrawings()).toEqual([])
+
+    await putDrawing(A)
+    await putDrawing(B)
+    expect(await getDrawing('一')).toEqual(A)
+    expect(await getAllDrawings()).toHaveLength(2)
+
+    const updated = { ...A, dataUrl: 'data:image/png;base64,CCC', updatedAt: NOW + 1 }
+    await putDrawing(updated)
+    expect(await getDrawing('一')).toEqual(updated)
+    expect(await getAllDrawings()).toHaveLength(2)
+
+    await deleteDrawing('一')
+    expect(await getDrawing('一')).toBeUndefined()
+    expect(await getAllDrawings()).toEqual([B])
+
+    await clearDrawings()
+    expect(await getAllDrawings()).toEqual([])
+  })
+
+  it('survives closeDb and reopening the database', async () => {
+    await putDrawing(A)
+    closeDb()
+    expect(await getDrawing('一')).toEqual(A)
+    expect(await getAllDrawings()).toEqual([A])
+  })
+
+  it('resetProgress keeps drawings (they are personal notes, not SRS state)', async () => {
+    await putDrawing(A)
+    await answerCard('一', 'good', NOW)
+    await resetProgress()
+    expect(await getDrawing('一')).toEqual(A)
+    expect(await getCard('一')).toMatchObject({ state: 'new' })
+  })
+})
+
+describe('v1 → v2 migration', () => {
+  it('adds ignored: false and normalizes knownPrev on legacy cards', async () => {
+    closeDb()
+    await deleteDatabase()
+    const legacy = await openLegacyV1()
+    await rawPut(legacy, 'cards', {
+      kanji: '一',
+      pos: 0,
+      known: false,
+      state: 'new',
+      step: -1,
+      ease: STARTING_EASE,
+      interval: 0,
+      due: NOW,
+      reps: 0,
+      lapses: 0,
+    })
+    legacy.close()
+
+    const card = await getCard('一')
+    expect(card!.ignored).toBe(false)
+    expect(card!.knownPrev).toBeNull()
   })
 })
 
@@ -293,9 +541,41 @@ describe('session round-trip', () => {
 
 function openRawConnection(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1)
+    const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
+  })
+}
+
+function deleteDatabase(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(DB_NAME)
+    req.onsuccess = () => resolve(undefined)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+function openLegacyV1(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      db.createObjectStore('cards', { keyPath: 'kanji' })
+      const logStore = db.createObjectStore('log', { keyPath: 'id', autoIncrement: true })
+      logStore.createIndex('by-timestamp', 'timestamp')
+      db.createObjectStore('settings')
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+function rawPut(db: IDBDatabase, store: string, value: unknown): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite')
+    tx.objectStore(store).put(value)
+    tx.oncomplete = () => resolve(undefined)
+    tx.onerror = () => reject(tx.error)
   })
 }
 

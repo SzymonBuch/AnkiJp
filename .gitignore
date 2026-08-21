@@ -15,6 +15,9 @@ dev-dist
 # Data pipeline intermediates (large; regenerate with scripts/)
 scripts/out
 
+# Ad-hoc command output captures
+*-output.txt
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

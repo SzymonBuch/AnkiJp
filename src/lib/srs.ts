@@ -1,12 +1,27 @@
 export type Rating = 'again' | 'hard' | 'good' | 'easy'
 export type CardState = 'new' | 'learning' | 'review' | 'relearning'
 
+/** Fully reproducible SRS state, captured when a card is marked as known. */
+export interface KnownSnapshot {
+  state: CardState
+  step: number
+  ease: number
+  interval: number
+  due: number
+  reps: number
+  lapses: number
+}
+
 export interface SrsCard {
   kanji: string
   /** Position in the study order (seed order), used to order new cards. */
   pos: number
   /** Manually marked as "known" (e.g. in the Deck). Included in quiz pools. */
   known: boolean
+  /** Ignored cards are excluded from session queues and summaries. */
+  ignored: boolean
+  /** State before "mark as known"; restored when the mark is removed. */
+  knownPrev?: KnownSnapshot | null
   state: CardState
   /** Index into the current step list (learning/relearning), 0-based. */
   step: number
@@ -47,6 +62,8 @@ export function createCard(kanji: string, pos: number, now: number): SrsCard {
     kanji,
     pos,
     known: false,
+    ignored: false,
+    knownPrev: null,
     state: 'new',
     step: -1,
     ease: STARTING_EASE,
@@ -130,6 +147,23 @@ function rateReview(card: SrsCard, rating: Rating, now: number, rng: () => numbe
       return card
     }
   }
+}
+
+/**
+ * Short description of what answering `rating` would do to `card`
+ * (e.g. "1 min", "~4 days", "relearn 10 min"). Derived from rateCard itself —
+ * never reimplement the rules here — so the two cannot drift apart.
+ * Day-scale results carry a `~` because fuzz is rolled at answer time
+ * (shown at the minimum fuzz edge).
+ */
+export function ratingOutcome(card: SrsCard, rating: Rating): string {
+  const next = rateCard(card, rating, 0, () => 0)
+  if (next.due < DAY_MS) {
+    const mins = Math.round(next.due / MIN_MS)
+    return next.state === 'relearning' ? `relearn ${mins} min` : `${mins} min`
+  }
+  const days = Math.round(next.due / DAY_MS)
+  return `~${days} ${days === 1 ? 'day' : 'days'}`
 }
 
 function graduate(card: SrsCard, now: number, intervalDays: number, rng: () => number): SrsCard {
