@@ -17,6 +17,12 @@ import { RADICALS_DATA } from './radicals'
 import { VOCAB_DATA } from './vocab'
 import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
 import { buildGateContext, isComponentSeen, isKanjiUnlocked, isVocabUnlocked } from './gating'
+import {
+  compareStudyMixed,
+  CONTENT_TYPES,
+  introductionTimes,
+  type SessionType,
+} from './mixed'
 
 export const DB_NAME = 'ankijp'
 export const DB_VERSION = 3
@@ -388,43 +394,67 @@ export interface SessionQueue {
 }
 
 /**
- * Build the session queue for one content type. The daily new-card budget is
- * per type (kanji `newPerDay`, radicals/vocab their own settings); the review
- * limit stays global across types. New kanji are gated: a kanji only enters
- * the fresh queue once all of its components have been seen (#3, via the same
- * predicate as migration rule B).
+ * Build the session queue for one content type or for all of them mixed
+ * together. The daily new-card budget is per type (kanji `newPerDay`,
+ * radicals/vocab their own settings); in a mixed session every type keeps
+ * its own budget while the review limit stays global across types (Etap 0).
+ * New kanji are gated: a kanji only enters the fresh queue once all of its
+ * components have been seen (#3, via the same predicate as migration rule B).
+ *
+ * Mixed queues: reviews merge across types by date — purely Anki-like; fresh
+ * cards follow the topological study order (radykał → znak → słowo) with the
+ * freshness heuristic, so a just-introduced component is followed by its
+ * kanji and then their words (`compareStudyMixed`).
  */
 export async function getSessionQueue(
-  type: ContentType = 'kanji',
+  type: SessionType = 'kanji',
   now = Date.now(),
 ): Promise<SessionQueue> {
   await ensureSeeded()
-  const [settings, cards, counts, globalCounts] = await Promise.all([
+  const types: readonly ContentType[] = type === 'mixed' ? CONTENT_TYPES : [type]
+  const [settings, cards, globalCounts, ...perTypeCounts] = await Promise.all([
     getSettings(),
     getAllCards(),
-    getDailyCounts(now, type),
     getDailyCounts(now),
+    ...types.map((t) => getDailyCounts(now, t)),
   ])
   const endOfToday = startOfDay(now) + DAY_MS
-  const ofType = cards.filter((c) => typeOf(c.id) === type && !c.ignored)
-  const gateCtx = type === 'kanji' ? buildGateContext(cards) : null
 
-  const learning = ofType
-    .filter((c) => c.state === 'learning' || c.state === 'relearning')
-    .filter((c) => c.due <= now)
-    .sort((a, b) => a.due - b.due)
+  const learning: SrsCard[] = []
+  const due: SrsCard[] = []
+  const freshBands: SrsCard[][] = []
+  const gateCtx = types.includes('kanji') ? buildGateContext(cards) : null
 
-  const review = ofType
-    .filter((c) => c.state === 'review' && c.due <= endOfToday)
+  types.forEach((t, index) => {
+    const ofType = cards.filter((c) => typeOf(c.id) === t && !c.ignored)
+    learning.push(
+      ...ofType
+        .filter((c) => c.state === 'learning' || c.state === 'relearning')
+        .filter((c) => c.due <= now)
+        .sort((a, b) => a.due - b.due),
+    )
+    due.push(...ofType.filter((c) => c.state === 'review' && c.due <= endOfToday))
+
+    const freshLimitKey = NEW_PER_DAY[t]
+    freshBands.push(
+      ofType
+        .filter((c) => c.state === 'new')
+        .sort((a, b) => a.pos - b.pos)
+        // Only kanji are gated (#3); radicals and words pass through.
+        .filter((c) => gateCtx === null || typeOf(c.id) !== 'kanji' || isKanjiUnlocked(getKanji(bareId(c.id)), gateCtx))
+        .slice(0, Math.max(0, settings[freshLimitKey] - perTypeCounts[index].newToday)),
+    )
+  })
+
+  learning.sort((a, b) => a.due - b.due)
+  const review = due
     .sort((a, b) => a.due - b.due)
     .slice(0, Math.max(0, settings.reviewLimit - globalCounts.reviewsToday))
-
-  const freshLimitKey = NEW_PER_DAY[type]
-  const fresh = ofType
-    .filter((c) => c.state === 'new')
-    .sort((a, b) => a.pos - b.pos)
-    .filter((c) => gateCtx === null || isKanjiUnlocked(getKanji(bareId(c.id)), gateCtx))
-    .slice(0, Math.max(0, settings[freshLimitKey] - counts.newToday))
+  let fresh = freshBands[0] ?? []
+  if (type === 'mixed') {
+    const intro = introductionTimes(await getLogs())
+    fresh = freshBands.flat().sort((a, b) => compareStudyMixed(a, b, intro))
+  }
 
   return { learning, review, fresh }
 }
@@ -561,15 +591,16 @@ export interface Summary {
 
 /** Lightweight counters for dashboards; `known` = review cards at/over the known threshold. */
 export async function getSummary(
-  type: ContentType = 'kanji',
+  type: SessionType = 'kanji',
   now = Date.now(),
 ): Promise<Summary> {
   await ensureSeeded()
   const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
   const endOfToday = startOfDay(now) + DAY_MS
   const summary: Summary = { fresh: 0, learning: 0, due: 0, known: 0, future: 0 }
+  const types: readonly ContentType[] = type === 'mixed' ? CONTENT_TYPES : [type]
   for (const card of cards) {
-    if (card.ignored || typeOf(card.id) !== type) continue
+    if (card.ignored || !types.includes(typeOf(card.id))) continue
     if (card.state === 'new') summary.fresh++
     else if (card.state === 'learning' || card.state === 'relearning') summary.learning++
     else {

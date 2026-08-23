@@ -1,13 +1,14 @@
 import { SessionView } from '../components/SessionView'
-import type { ContentType } from '../lib/srs'
+import type { SessionType } from '../lib/mixed'
 
-const TITLES: Record<ContentType, string> = {
-  kanji: 'Study',
+const TITLES: Record<SessionType, string> = {
+  mixed: 'Study',
+  kanji: 'Study kanji',
   radical: 'Study radicals',
   vocab: 'Study words',
 }
 
-export function StudyScreen({ type = 'kanji', onExit }: { type?: ContentType; onExit: () => void }) {
+export function StudyScreen({ type = 'mixed', onExit }: { type?: SessionType; onExit: () => void }) {
   return (
     <SessionView
       kind="study"

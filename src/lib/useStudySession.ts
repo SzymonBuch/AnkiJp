@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { answerCard, getSessionQueue, markIgnored } from './db'
-import { typeOf, type ContentType, type Rating, type SrsCard } from './srs'
+import type { SessionType } from './mixed'
+import { typeOf, type Rating, type SrsCard } from './srs'
 
 export type SessionKind = 'study' | 'review'
 export type SessionStatus = 'loading' | 'ready' | 'done' | 'empty'
@@ -27,12 +28,13 @@ export interface StudySession {
 
 /**
  * Shared state for a Study (new cards) or Review (due cards) session over one
- * content type. The queue is rebuilt from the DB after every answer, so
- * learning/relearning steps that have elapsed are pulled back into the same
- * session and gating re-evaluates mid-session (studied components unlock
- * kanji on the next rebuild).
+ * content type or over all types mixed together. The queue is rebuilt from
+ * the DB after every answer, so learning/relearning steps that have elapsed
+ * are pulled back into the same session, gating re-evaluates mid-session
+ * (studied components unlock kanji on the next rebuild) and — in a mixed
+ * study session — freshly unlocked cards float to the front.
  */
-export function useStudySession(kind: SessionKind, type: ContentType = 'kanji'): StudySession {
+export function useStudySession(kind: SessionKind, type: SessionType = 'kanji'): StudySession {
   const [status, setStatus] = useState<SessionStatus>('loading')
   const [cards, setCards] = useState<SrsCard[]>([])
   const [progress, setProgress] = useState<SessionProgress>({

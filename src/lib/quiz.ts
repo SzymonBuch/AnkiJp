@@ -1,7 +1,7 @@
 import { getKanji, type KanjiEntry } from './kanji'
 import { getRadical, type RadicalEntry } from './radicals'
 import { getVocab, type VocabEntry } from './vocab'
-import { bareId, DAY_MS, STARTING_EASE, type SrsCard } from './srs'
+import { bareId, DAY_MS, STARTING_EASE, typeOf, type ContentType, type SrsCard } from './srs'
 import type { QuizPools } from './db'
 
 export type QuizSource = 'known' | 'progress' | 'new'
@@ -353,6 +353,72 @@ export function selectVocabTargets(
     candidates.push(getVocab(id))
   }
   return sampleKanji(candidates, config.count, rng)
+}
+
+/** Mixed-scope quiz targets grouped per content type (Etap 5). */
+export interface MixedTargets {
+  kanji: KanjiEntry[]
+  radical: RadicalEntry[]
+  vocab: VocabEntry[]
+}
+
+/**
+ * Sample quiz targets from all three content types at once (Etap 5): the
+ * default mixed pool. Filters apply uniformly; the grade filter is
+ * meaningful only for kanji and never drops radicals or words. The sampled
+ * cards are grouped by type afterwards so each builder receives its own
+ * entry kind.
+ */
+export function selectMixedTargets(
+  config: Pick<QuizConfig, 'sources' | 'grades' | 'count' | 'dueOnly' | 'problematicOnly'>,
+  poolsByType: Record<ContentType, QuizPools>,
+  now: number,
+  rng: () => number = Math.random,
+): MixedTargets {
+  const grades = new Set(config.grades)
+  const candidates: SrsCard[] = []
+  for (const type of ['radical', 'kanji', 'vocab'] as const) {
+    const pools = poolsByType[type]
+    for (const card of config.sources.flatMap((source) => pools[source] ?? [])) {
+      if (!passesFilters(card, config, now)) continue
+      if (type === 'kanji' && !grades.has(getKanji(bareId(card.id)).grade)) continue
+      candidates.push(card)
+    }
+  }
+  const targets: MixedTargets = { kanji: [], radical: [], vocab: [] }
+  for (const card of sampleKanji(candidates, config.count, rng)) {
+    switch (typeOf(card.id)) {
+      case 'kanji':
+        targets.kanji.push(getKanji(bareId(card.id)))
+        break
+      case 'radical':
+        targets.radical.push(getRadical(bareId(card.id)))
+        break
+      case 'vocab':
+        targets.vocab.push(getVocab(bareId(card.id)))
+        break
+    }
+  }
+  return targets
+}
+
+/**
+ * Build one quiz from mixed-scope targets (Etap 5): every group runs through
+ * its own builder — radicals always answer in meaning mode (Etap 2), so a
+ * reading/reverse request falls back to meaning for them — and the combined
+ * questions are shuffled into a single interleaved run.
+ */
+export function buildMixedQuiz(
+  mode: Exclude<QuizMode, 'cloze'>,
+  targets: MixedTargets,
+  all: { kanji: KanjiEntry[]; radical: RadicalEntry[]; vocab: VocabEntry[] },
+  rng: () => number = Math.random,
+): QuizQuestion[] {
+  const parts: QuizQuestion[] = []
+  if (targets.radical.length > 0) parts.push(...buildRadicalQuiz(targets.radical, all.radical, rng))
+  if (targets.kanji.length > 0) parts.push(...buildQuiz(mode, targets.kanji, all.kanji, rng))
+  if (targets.vocab.length > 0) parts.push(...buildVocabQuiz(mode, targets.vocab, all.vocab, rng))
+  return shuffle(parts, rng).map((question, index) => ({ ...question, index }))
 }
 
 function availableModes(entry: KanjiEntry): QuestionMode[] {

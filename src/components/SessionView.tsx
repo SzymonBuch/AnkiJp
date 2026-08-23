@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { getAllCards, getAllDrawings, getCard, getSettings, markIgnored, markKnown, type Settings } from '../lib/db'
 import { lockedVocabRows } from '../lib/gating'
 import { getKanji } from '../lib/kanji'
+import type { SessionType } from '../lib/mixed'
 import { getRadical } from '../lib/radicals'
 import { getVocab } from '../lib/vocab'
-import { bareId, cardId, typeOf, type ContentType, type Rating, type SrsCard } from '../lib/srs'
+import { bareId, cardId, typeOf, type Rating, type SrsCard } from '../lib/srs'
 import {
   useStudySession,
   type SessionKind,
@@ -17,7 +18,8 @@ import { VocabCard } from './VocabCard'
 
 interface SessionViewProps {
   kind: SessionKind
-  type?: ContentType
+  /** One content type or a mixed session over all of them (Etap 5). */
+  type?: SessionType
   title: string
   onExit: () => void
 }

@@ -34,12 +34,15 @@ import { KANJI_DATA } from './kanji'
 import { RADICALS_DATA } from './radicals'
 import { VOCAB_DATA } from './vocab'
 import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
+import { TYPE_RANK } from './mixed'
+import { buildGateContext, isKanjiUnlocked } from './gating'
 import {
   DAY_MS,
   MIN_MS,
   STARTING_EASE,
   bareId,
   cardId,
+  createCard,
   rateCard,
   typeOf,
 } from './srs'
@@ -1210,6 +1213,155 @@ describe('session round-trip', () => {
     expect(q.learning.map((c) => c.id).sort()).toEqual(
       [cardId('kanji', first.kanji), cardId('kanji', second.kanji)].sort(),
     )
+  })
+})
+
+describe('mixed sessions (Etap 5)', () => {
+  /** A kanji with distinct real components, so gating scenarios are controllable. */
+  const GATED = KANJI_DATA.find((e) =>
+    e.radicals.some((r) => r.glyph !== e.kanji && RADICALS_DATA.some((x) => x.glyph === r.glyph)),
+  )!
+  /** Its components that have radical cards. */
+  const GATED_COMPONENTS = GATED.radicals
+    .filter((r) => r.glyph !== GATED.kanji)
+    .map((r) => r.glyph)
+    .filter((glyph) => RADICALS_DATA.some((x) => x.glyph === glyph))
+
+  it('orders fresh cards into topological bands: radicals, then unlocked kanji, then words', async () => {
+    // Introduce the gated kanji's components one by one (distinct timestamps).
+    for (const [index, glyph] of GATED_COMPONENTS.entries()) {
+      await answerCard(cardId('radical', glyph), 'good', NOW - (index + 1) * MIN_MS)
+    }
+
+    const q = await getSessionQueue('mixed', NOW)
+    const ids = q.fresh.map((c) => c.id)
+    const bands = ids.map((id) => TYPE_RANK[typeOf(id)])
+    for (let i = 1; i < bands.length; i++) {
+      expect(bands[i]).toBeGreaterThanOrEqual(bands[i - 1])
+    }
+    expect(new Set(bands)).toEqual(new Set([0, 1, 2]))
+
+    // Freshness heuristic: the just-unlocked kanji leads its band, ahead of
+    // the always-unlocked self-fallback kanji (freshness 0).
+    const gatedIndex = ids.indexOf(cardId('kanji', GATED.kanji))
+    expect(gatedIndex).toBeGreaterThan(-1)
+    expect(bands[gatedIndex]).toBe(1)
+    const selfOnly = KANJI_DATA.filter(
+      (e) => e.radicals.length >= 1 && e.radicals.every((r) => r.glyph === e.kanji),
+    )
+    for (const entry of selfOnly) {
+      const index = ids.indexOf(cardId('kanji', entry.kanji))
+      if (index >= 0) expect(gatedIndex).toBeLessThan(index)
+    }
+  })
+
+  it('follows a freshly studied kanji with its own word at the head of the vocab band', async () => {
+    const word = VOCAB_DATA.find((e) => e.kanji.length === 1)!
+    // Raise the vocab inventory first: the default budget filled up during
+    // the beforeEach reset, and a full inventory blocks materialization.
+    await setSettings({ newPerDayVocab: VOCAB_DATA.length })
+    // Introduce the word's only kanji without gating constraints: a seen
+    // card plus a matching log entry is exactly what the freshness heuristic
+    // and `isVocabUnlocked` read.
+    const id = cardId('kanji', word.kanji[0])
+    await putCard({ ...(await getCard(id))!, state: 'learning', step: 0, due: NOW + MIN_MS })
+    await addLog({
+      cardId: id,
+      rating: 'good',
+      prevState: 'new',
+      newState: 'learning',
+      interval: 0,
+      ease: STARTING_EASE,
+      due: NOW + MIN_MS,
+      timestamp: NOW - MIN_MS,
+    })
+
+    const q = await getSessionQueue('mixed', NOW)
+    const ids = q.fresh.map((c) => c.id)
+    const vocabStart = ids.findIndex((cid) => typeOf(cid) === 'vocab')
+    expect(vocabStart).toBeGreaterThan(-1)
+    // The word materialized on the rebuild and precedes the pure-kana words.
+    expect(ids.slice(vocabStart)).toContain(`w:${word.id}`)
+    expect(ids[vocabStart]).toBe(`w:${word.id}`)
+  })
+
+  it('aggregates fresh queues while respecting each per-type daily limit', async () => {
+    await setSettings({ newPerDayRadical: 2, newPerDay: 1, newPerDayVocab: 3 })
+
+    // Unlock one extra kanji without spending any budget: materialize the
+    // gated kanji's components as already seen (no log entries).
+    for (const glyph of GATED_COMPONENTS) {
+      const component = (await getCard(cardId('radical', glyph)))!
+      await putCard({ ...component, state: 'learning', step: 0, due: NOW + MIN_MS })
+    }
+
+    const q = await getSessionQueue('mixed', NOW)
+    const countBy = (t: 'kanji' | 'radical' | 'vocab') =>
+      q.fresh.filter((c) => typeOf(c.id) === t).length
+    expect(countBy('radical')).toBe(2)
+    expect(countBy('vocab')).toBe(3)
+    // Kanji budget of 1 goes to the first unlocked kanji in study order.
+    const ctx = buildGateContext(await getAllCards())
+    const unlocked = KANJI_DATA.filter((e) => isKanjiUnlocked(e, ctx)).map((e) => e.kanji)
+    expect(countBy('kanji')).toBe(1)
+    expect(q.fresh.map((c) => c.id)).toContain(cardId('kanji', unlocked[0]))
+    expect(await getDailyCounts(NOW)).toEqual({ newToday: 0, reviewsToday: 0 })
+  })
+
+  it('merges due review cards across types by date under the global review limit', async () => {
+    await setSettings({ reviewLimit: 2 })
+    const markDue = async (id: string, due: number) => {
+      const card = (await getCard(id))!
+      await putCard({ ...card, state: 'review', interval: 30, due })
+    }
+    // A vocab card fabricated directly (bypasses lazy materialization).
+    const word = VOCAB_DATA[0]
+    const vocabCard = createCard(`w:${word.id}`, VOCAB_DATA.indexOf(word), NOW)
+    await putCard({ ...vocabCard, state: 'review', interval: 30, due: NOW - 90_000 })
+    await markDue(cardId('kanji', KANJI_DATA[4].kanji), NOW - 60_000)
+    await markDue(`r:${RADICALS_DATA[3].glyph}`, NOW - 30_000)
+
+    // Order follows the due date alone — the radical is due last and the
+    // global cap drops it even though radicals come first while studying.
+    const q = await getSessionQueue('mixed', NOW)
+    expect(q.review.map((c) => c.id)).toEqual([
+      `w:${word.id}`,
+      cardId('kanji', KANJI_DATA[4].kanji),
+    ])
+  })
+
+  it('merges elapsed learning steps across types ordered by due time', async () => {
+    await answerCard(cardId('kanji', KANJI_DATA[0].kanji), 'good', NOW - 2 * MIN_MS)
+    await answerCard(`r:${RADICALS_DATA[0].glyph}`, 'good', NOW - MIN_MS)
+
+    const study = await getSessionQueue('mixed', NOW)
+    expect(study.learning.map((c) => c.id)).toEqual([
+      cardId('kanji', KANJI_DATA[0].kanji),
+      `r:${RADICALS_DATA[0].glyph}`,
+    ])
+    // Review sessions pick elapsed steps up symmetrically: answering the kanji
+    // reschedules it beyond `now`, while the radical stays queued by date.
+    await answerCard(cardId('kanji', KANJI_DATA[0].kanji), 'again', NOW)
+    const review = await getSessionQueue('mixed', NOW)
+    expect(review.learning.map((c) => c.id)).toEqual([`r:${RADICALS_DATA[0].glyph}`])
+  })
+
+  it('sums summaries over all content types', async () => {
+    await answerCard(cardId('radical', RADICALS_DATA[0].glyph), 'good', NOW)
+    await answerCard(cardId('kanji', KANJI_DATA[0].kanji), 'good', NOW)
+
+    const mixed = await getSummary('mixed', NOW)
+    const parts = await Promise.all([
+      getSummary('radical', NOW),
+      getSummary('kanji', NOW),
+      getSummary('vocab', NOW),
+    ])
+    const keys = ['fresh', 'learning', 'due', 'known', 'future'] as const
+    for (const key of keys) {
+      expect(mixed[key]).toBe(parts.reduce((sum, part) => sum + part[key], 0))
+    }
+    expect(mixed.learning).toBe(2)
+    expect(mixed.fresh).toBeGreaterThan(parts[1].fresh)
   })
 })
 

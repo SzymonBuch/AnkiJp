@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react'
 import { getLogs, getSummary, type Summary } from '../lib/db'
 import type { Screen } from '../lib/nav'
 import type { ContentType } from '../lib/srs'
+import type { SessionType } from '../lib/mixed'
 import { computeStats } from '../lib/stats'
 
 interface DashboardScreenProps {
-  onNavigate: (screen: Screen, type?: ContentType) => void
+  onNavigate: (screen: Screen, type?: SessionType) => void
 }
 
-/** Content types with study/review/quiz sessions; vocab joins in its own stage. */
+/** Content types with single-type study/review/quiz sessions. */
 const SESSION_TYPES: { type: ContentType; label: string }[] = [
   { type: 'kanji', label: 'Kanji' },
   { type: 'radical', label: 'Radicals' },
@@ -69,19 +70,19 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
         <SessionNav
           screen="study"
           label="Study new cards"
-          description="Introduce new cards"
+          description="Radicals, kanji and words together — or pick a single type"
           onNavigate={onNavigate}
         />
         <SessionNav
           screen="review"
           label="Review due cards"
-          description="Due for review today"
+          description="Everything due today, ordered by date"
           onNavigate={onNavigate}
         />
         <SessionNav
           screen="quiz"
           label="Quiz"
-          description="Isolated practice"
+          description="Mixed pool by default — isolated practice"
           onNavigate={onNavigate}
         />
         <NavButton
@@ -106,6 +107,10 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
   )
 }
 
+/**
+ * One session entry. The row itself starts the mixed session (the default,
+ * Etap 5); the chips narrow it to a single content type.
+ */
 function SessionNav({
   screen,
   label,
@@ -115,26 +120,35 @@ function SessionNav({
   screen: Screen
   label: string
   description: string
-  onNavigate: (screen: Screen, type?: ContentType) => void
+  onNavigate: (screen: Screen, type?: SessionType) => void
 }) {
   return (
-    <div className="rounded-xl border border-slate-300 bg-white px-5 py-3 shadow-sm dark:border-slate-600 dark:bg-slate-900">
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-semibold text-slate-700 dark:text-slate-300">{label}</span>
-        <span className="flex gap-2">
-          {SESSION_TYPES.map(({ type, label: typeLabel }) => (
-            <button
-              key={type}
-              type="button"
-              onClick={() => onNavigate(screen, type)}
-              className="min-h-9 rounded-full border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-600 transition active:scale-95 hover:border-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-400"
-            >
-              {typeLabel}
-            </button>
-          ))}
+    <div className="flex items-stretch justify-between gap-2 rounded-xl border border-slate-300 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-900">
+      <button
+        type="button"
+        onClick={() => onNavigate(screen)}
+        className="min-h-11 flex-1 rounded-l-xl py-3 pl-5 text-left transition active:scale-[0.98]"
+      >
+        <span className="flex items-center gap-2">
+          <span className="font-semibold text-slate-700 dark:text-slate-300">{label}</span>
+          <span className="rounded-md bg-slate-800 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white dark:bg-slate-100 dark:text-slate-900">
+            Mixed
+          </span>
         </span>
-      </div>
-      <p className="mt-0.5 text-sm text-slate-400 dark:text-slate-500">{description}</p>
+        <span className="mt-0.5 block text-sm text-slate-400 dark:text-slate-500">{description}</span>
+      </button>
+      <span className="flex flex-wrap items-center gap-1.5 pr-4 py-2">
+        {SESSION_TYPES.map(({ type, label: typeLabel }) => (
+          <button
+            key={type}
+            type="button"
+            onClick={() => onNavigate(screen, type)}
+            className="relative z-10 min-h-9 rounded-full border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-600 transition active:scale-95 hover:border-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-400"
+          >
+            {typeLabel}
+          </button>
+        ))}
+      </span>
     </div>
   )
 }

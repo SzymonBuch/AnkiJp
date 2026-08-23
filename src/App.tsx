@@ -8,13 +8,14 @@ import { SettingsScreen } from './screens/SettingsScreen'
 import { StatsScreen } from './screens/StatsScreen'
 import { StudyScreen } from './screens/StudyScreen'
 import type { Screen } from './lib/nav'
-import type { ContentType } from './lib/srs'
+import type { SessionType } from './lib/mixed'
 
 function App() {
   const [screen, setScreen] = useState<Screen>('home')
-  const [contentType, setContentType] = useState<ContentType>('kanji')
+  // Mixed sessions are the app's default; single types stay selectable.
+  const [contentType, setContentType] = useState<SessionType>('mixed')
   const goHome = () => setScreen('home')
-  const navigate = (next: Screen, type: ContentType = 'kanji') => {
+  const navigate = (next: Screen, type: SessionType = 'mixed') => {
     setContentType(type)
     setScreen(next)
   }
