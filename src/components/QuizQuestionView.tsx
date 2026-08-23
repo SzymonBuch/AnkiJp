@@ -119,6 +119,18 @@ export function QuizQuestionView({
               ? 'Correct!'
               : `Not quite — the answer is ${question.correct}`}
           </p>
+          {question.kind === 'vocab' && (
+            // Post-answer reinforcement: re-show the word together with its
+            // reading and meaning, whatever the question mode asked for.
+            <div className="flex flex-col items-center gap-0.5 text-center">
+              <span className="text-2xl font-semibold leading-snug">
+                {question.furiganaHtml ? <Furigana html={question.furiganaHtml} /> : question.vocabId}
+              </span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">
+                {question.reading} · {question.meaning}
+              </span>
+            </div>
+          )}
           {question.kind === 'kanji' && isCloze && question.sentenceEn && (
             <p className="max-w-sm text-center text-sm text-slate-500 dark:text-slate-400">
               {question.sentenceEn}

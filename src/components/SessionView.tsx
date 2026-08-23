@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { getAllDrawings, getCard, getSettings, markIgnored, markKnown, type Settings } from '../lib/db'
+import { getAllCards, getAllDrawings, getCard, getSettings, markIgnored, markKnown, type Settings } from '../lib/db'
+import { lockedVocabRows } from '../lib/gating'
 import { getKanji } from '../lib/kanji'
 import { getRadical } from '../lib/radicals'
 import { getVocab } from '../lib/vocab'
@@ -28,6 +29,11 @@ export function SessionView({ kind, type = 'kanji', title, onExit }: SessionView
   const [settings, setSettings] = useState<Settings | null>(null)
   /** Kanji detail opened from a radical's "used in" grid. */
   const [selected, setSelected] = useState<SrsCard | null>(null)
+  /**
+   * Words whose kanji are not all studied yet — shown when a vocab session
+   * runs dry, so "All caught up" never reads like "there is nothing left".
+   */
+  const [lockedVocab, setLockedVocab] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -40,6 +46,17 @@ export function SessionView({ kind, type = 'kanji', title, onExit }: SessionView
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (type !== 'vocab') return
+    let cancelled = false
+    getAllCards().then((cards) => {
+      if (!cancelled) setLockedVocab(lockedVocabRows(cards).length)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [type, status])
 
   useEffect(() => {
     const shortcuts: Record<string, Rating> = {
@@ -142,11 +159,19 @@ export function SessionView({ kind, type = 'kanji', title, onExit }: SessionView
           </>
         )}
         {(status === 'done' || status === 'empty') && (
-          <Summary
-            empty={status === 'empty'}
-            progress={session.progress}
-            onExit={onExit}
-          />
+          <>
+            {type === 'vocab' && status === 'empty' && lockedVocab > 0 && (
+              <p className="mx-auto mb-4 max-w-md rounded-xl border border-sky-300 bg-sky-50 p-3 text-center text-sm text-sky-800 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+                <span className="font-bold tabular-nums">{lockedVocab}</span> more words will
+                unlock as you study their kanji — see the Deck for the roadmap.
+              </p>
+            )}
+            <Summary
+              empty={status === 'empty'}
+              progress={session.progress}
+              onExit={onExit}
+            />
+          </>
         )}
       </main>
 

@@ -1,6 +1,6 @@
 import { getKanji, type KanjiEntry } from './kanji'
 import { bareId, cardId, typeOf, type SrsCard } from './srs'
-import type { VocabEntry } from './vocab'
+import { VOCAB_DATA, type VocabEntry } from './vocab'
 
 export interface GateContext {
   /** Ids of cards seen at least once (state ≠ `new`), any content type. */
@@ -66,4 +66,25 @@ export function missingComponents(entry: KanjiEntry, ctx: GateContext): string[]
  */
 export function isVocabUnlocked(entry: VocabEntry, ctx: GateContext): boolean {
   return entry.kanji.every((glyph) => ctx.seenIds.has(cardId('kanji', glyph)))
+}
+
+/** A ranked word still waiting for its kanji, with the glyphs it misses. */
+export interface LockedVocabRow {
+  entry: VocabEntry
+  missing: string[]
+}
+
+/**
+ * Every ranked vocabulary word that is not yet introducible (Etap 4 roadmap:
+ * the Deck drill-down and the empty-session hint). Words are returned in
+ * top-2000 order — the order they will unlock in.
+ */
+export function lockedVocabRows(cards: readonly SrsCard[]): LockedVocabRow[] {
+  const ctx = buildGateContext(cards)
+  const rows: LockedVocabRow[] = []
+  for (const entry of VOCAB_DATA) {
+    const missing = entry.kanji.filter((glyph) => !ctx.seenIds.has(cardId('kanji', glyph)))
+    if (missing.length > 0) rows.push({ entry, missing })
+  }
+  return rows
 }

@@ -15,7 +15,7 @@ import {
   putDrawing,
   type Settings,
 } from '../lib/db'
-import { buildGateContext, isKanjiUnlocked, missingComponents } from '../lib/gating'
+import { buildGateContext, isKanjiUnlocked, lockedVocabRows, missingComponents, type LockedVocabRow } from '../lib/gating'
 import { getKanji } from '../lib/kanji'
 import { DAY_MS, bareId, cardId, typeOf, type ContentType, type SrsCard } from '../lib/srs'
 import { getRadical } from '../lib/radicals'
@@ -55,6 +55,9 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: 'ignored', label: 'Ignored' },
 ]
 
+/** How many locked words the roadmap lists before collapsing into "+N more". */
+const LOCKED_VOCAB_PREVIEW = 15
+
 const CELL_COLOR: Record<CardStatus, string> = {
   new: 'text-slate-400 dark:text-slate-500',
   learning: 'text-amber-600 dark:text-amber-400',
@@ -75,6 +78,7 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
   const [padOpen, setPadOpen] = useState(false)
   const [now, setNow] = useState(0)
   const [showBlocked, setShowBlocked] = useState(false)
+  const [showLocked, setShowLocked] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -93,6 +97,16 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
   }, [])
 
   const cardsById = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards])
+
+  /**
+   * Vocab roadmap (Etap 4): ranked words whose kanji are not all studied yet.
+   * These have no card in the DB, so without this list they would be invisible
+   * — the learner could not tell what is coming or what to study next.
+   */
+  const lockedVocab = useMemo<LockedVocabRow[]>(
+    () => (cards.length === 0 ? [] : lockedVocabRows(cards)),
+    [cards],
+  )
 
   /**
    * Kanji still locked by gating (#3): new cards with at least one
@@ -187,8 +201,8 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
     })
   }
 
-  /** From a radical's "used in" grid straight into the kanji detail. */
-  const openKanjiFromRadical = async (kanji: string) => {
+  /** From a radical's "used in" grid or a word's missing-kanji chips into the kanji detail. */
+  const openKanjiDetail = async (kanji: string) => {
     const card = await getCard(cardId('kanji', kanji))
     if (card) setSelected(card)
   }
@@ -250,6 +264,26 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
             </button>
           )}
 
+          {tab === 'vocab' && lockedVocab.length > 0 && (
+            <button
+              type="button"
+              data-testid="vocab-locked-counter"
+              onClick={() => setShowLocked((open) => !open)}
+              aria-expanded={showLocked}
+              className={`flex min-h-11 items-center justify-between rounded-xl border px-4 text-sm font-medium transition active:scale-95 ${
+                showLocked
+                  ? 'border-sky-400 bg-sky-100 text-sky-900 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-200'
+                  : 'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300'
+              }`}
+            >
+              <span>
+                <span className="font-bold tabular-nums">{lockedVocab.length}</span> words waiting —
+                their kanji are not studied yet
+              </span>
+              <span aria-hidden="true">{showLocked ? '▲' : '▼'}</span>
+            </button>
+          )}
+
           <input
             type="search"
             value={query}
@@ -291,6 +325,46 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
       </header>
 
       <main className="mx-auto w-full max-w-3xl flex-1 p-4">
+        {showLocked && tab === 'vocab' && lockedVocab.length > 0 && (
+          <section
+            data-testid="vocab-locked-list"
+            className="mb-4 space-y-2 rounded-xl border border-sky-300 bg-sky-50 p-4 text-sm dark:border-sky-800 dark:bg-sky-950/40"
+          >
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-sky-800 dark:text-sky-300">
+              Next words and the kanji they are waiting for
+            </h2>
+            {lockedVocab.slice(0, LOCKED_VOCAB_PREVIEW).map(({ entry, missing }) => (
+              <div key={entry.id} className="flex items-start gap-3">
+                <span
+                  title={entry.meaning}
+                  className="min-h-11 shrink-0 rounded-lg border border-sky-300 bg-white px-2 py-1.5 text-lg font-semibold leading-tight [overflow-wrap:anywhere] text-sky-900 dark:border-sky-700 dark:bg-slate-900 dark:text-sky-200"
+                >
+                  {entry.id}
+                </span>
+                <span className="flex flex-wrap gap-1.5 pt-1.5">
+                  {missing.map((glyph) => (
+                    <button
+                      key={glyph}
+                      type="button"
+                      onClick={() => openKanjiDetail(glyph)}
+                      aria-label={`Open details for ${glyph}`}
+                      title={getKanji(glyph).meaning}
+                      className="flex h-9 w-9 items-center justify-center rounded-md border border-sky-300 bg-white text-lg font-semibold text-sky-900 transition hover:border-sky-400 active:scale-90 dark:border-sky-700 dark:bg-slate-900 dark:text-sky-200 dark:hover:border-sky-500"
+                    >
+                      {glyph}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            ))}
+            {lockedVocab.length > LOCKED_VOCAB_PREVIEW && (
+              <p className="text-xs text-sky-700/80 dark:text-sky-400/80">
+                +{lockedVocab.length - LOCKED_VOCAB_PREVIEW} more — they follow in the top-2000 order.
+              </p>
+            )}
+          </section>
+        )}
+
         {showBlocked && tab === 'kanji' && (
           <section
             data-testid="blocked-list"
@@ -368,7 +442,7 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
           card={selected}
           settings={settings}
           onToggleKnown={(known) => toggleKnown(selected.id, known)}
-          onSelectKanji={openKanjiFromRadical}
+          onSelectKanji={openKanjiDetail}
           onClose={() => setSelected(null)}
         />
       )}
@@ -394,7 +468,7 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
           settings={settings}
           onToggleKnown={(known) => toggleKnown(selected.id, known)}
           onToggleIgnored={(ignored) => toggleIgnored(selected.id, ignored)}
-          onSelectKanji={openKanjiFromRadical}
+          onSelectKanji={openKanjiDetail}
           onClose={() => setSelected(null)}
         />
       )}
