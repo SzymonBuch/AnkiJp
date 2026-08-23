@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { KANJI_DATA, type KanjiEntry } from './kanji'
 import { RADICALS_DATA, type RadicalEntry } from './radicals'
+import { VOCAB_DATA, type VocabEntry } from './vocab'
 import {
   buildQuiz,
   buildRadicalQuiz,
+  buildVocabQuiz,
   DEFAULT_QUIZ_CONFIG,
   isClozeEligible,
   primaryReading,
   sampleKanji,
   selectQuizTargets,
   selectRadicalTargets,
+  selectVocabTargets,
   type KanjiQuestion,
   type QuizConfig,
+  type VocabQuestion,
 } from './quiz'
 import { bareId, cardId, createCard, DAY_MS, STARTING_EASE, typeOf, type SrsCard } from './srs'
 
@@ -415,5 +419,235 @@ describe('selectRadicalTargets', () => {
     for (const target of targets) {
       expect(typeOf(cardId('radical', target.glyph))).toBe('radical')
     }
+  })
+})
+
+describe('selectQuizTargets grade-0 extension (Etap 3 deck, Etap 4 quiz option)', () => {
+  const NOW = new Date('2026-08-20T12:00:00Z').getTime()
+  const GRADE0 = KANJI_DATA.filter((e) => e.grade === 0)
+
+  function makePools() {
+    return {
+      known: GRADE0.slice(0, 4).map((e) => ({
+        ...createCard(cardId('kanji', e.kanji), KANJI_DATA.indexOf(e), NOW),
+        state: 'review' as const,
+        interval: 30,
+        due: NOW + 30 * DAY_MS,
+      })),
+      progress: [],
+      new: [],
+    }
+  }
+
+  it('excludes grade-0 kanji from the default grades [1–6] filter', () => {
+    const targets = selectQuizTargets(
+      { ...DEFAULT_QUIZ_CONFIG, count: 100 },
+      makePools(),
+      { now: NOW },
+      mulberry32(1),
+    )
+    expect(targets).toEqual([])
+  })
+
+  it('quizzes grade-0 kanji once the option is enabled', () => {
+    const targets = selectQuizTargets(
+      { ...DEFAULT_QUIZ_CONFIG, grades: [0], count: 100 },
+      makePools(),
+      { now: NOW },
+      mulberry32(2),
+    )
+    expect(targets.map((t) => t.kanji).sort()).toEqual(GRADE0.slice(0, 4).map((e) => e.kanji).sort())
+    for (const target of targets) expect(target.grade).toBe(0)
+  })
+})
+
+describe('buildVocabQuiz (Etap 4)', () => {
+  /** Mid-frequency words: distinct glosses and a deep distractor pool. */
+  const VPOOL = VOCAB_DATA.slice(120, 126)
+
+  function entryFor(question: VocabQuestion): VocabEntry {
+    return VOCAB_DATA.find((e) => e.id === question.vocabId)!
+  }
+
+  const glossesOf = (e: VocabEntry): Set<string> => new Set([e.meaning, ...e.meanings])
+
+  /** Entries allowed as distractor sources: no gloss shared with the target (#14). */
+  function eligible(target: VocabEntry): VocabEntry[] {
+    const targetGlosses = glossesOf(target)
+    return VOCAB_DATA.filter(
+      (e) =>
+        e.id !== target.id &&
+        ![e.meaning, ...e.meanings].some((gloss) => targetGlosses.has(gloss)),
+    )
+  }
+
+  function shapeScore(target: VocabEntry, entry: VocabEntry): number {
+    return (
+      Math.abs([...entry.id].length - [...target.id].length) +
+      Math.abs(entry.kanji.length - target.kanji.length)
+    )
+  }
+
+  it('meaning mode: prompt is the word with furigana available, correct is the display meaning', () => {
+    const quiz = buildVocabQuiz('meaning', VPOOL, VOCAB_DATA, mulberry32(1))
+    expect(quiz).toHaveLength(VPOOL.length)
+    for (const q of quiz) {
+      const entry = entryFor(q)
+      expect(q.kind).toBe('vocab')
+      expect(q.prompt).toBe(entry.id)
+      expect(q.furiganaHtml).toBe(entry.furiganaHtml)
+      expect(q.hideFurigana).toBeUndefined()
+      expect(q.correct).toBe(entry.meaning)
+      expect(q.options).toHaveLength(4)
+      expect(new Set(q.options).size).toBe(4)
+      expect(q.options.filter((o) => o === q.correct)).toHaveLength(1)
+    }
+  })
+
+  it('reading mode: prompt hides furigana and contains no <ruby>', () => {
+    const quiz = buildVocabQuiz('reading', VPOOL, VOCAB_DATA, mulberry32(2))
+    for (const q of quiz) {
+      const entry = entryFor(q)
+      expect(q.mode).toBe('reading')
+      // The furigana would spell out the answer — it must be hidden entirely.
+      expect(q.hideFurigana).toBe(true)
+      // No furigana data rides along with a reading prompt at all.
+      expect(q.furiganaHtml).toBeUndefined()
+      expect(q.prompt).not.toContain('<ruby>')
+      expect(q.correct).toBe(entry.reading)
+      expect(q.options).toHaveLength(4)
+      expect(new Set(q.options).size).toBe(4)
+      for (const option of q.options) {
+        if (option !== q.correct) {
+          expect(option).not.toBe(entry.reading)
+          expect(VOCAB_DATA.some((e) => e.reading === option)).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('reverse mode: prompt is the meaning, correct is the word form', () => {
+    const quiz = buildVocabQuiz('reverse', VPOOL, VOCAB_DATA, mulberry32(3))
+    for (const q of quiz) {
+      const entry = entryFor(q)
+      expect(q.prompt).toBe(entry.meaning)
+      expect(q.correct).toBe(entry.id)
+      expect(q.options).toHaveLength(4)
+      expect(new Set(q.options).size).toBe(4)
+      for (const option of q.options) {
+        if (option === q.correct) continue
+        const other = VOCAB_DATA.find((e) => e.id === option)!
+        const shared = [...glossesOf(other)].some((gloss) => glossesOf(entry).has(gloss))
+        expect(shared).toBe(false)
+      }
+    }
+  })
+
+  it('distractors share no gloss with the target in any mode (#14, all glosses both ways)', () => {
+    for (const mode of ['meaning', 'reading', 'reverse'] as const) {
+      const quiz = buildVocabQuiz(mode, VPOOL, VOCAB_DATA, mulberry32(4))
+      for (const q of quiz) {
+        const entry = entryFor(q)
+        const pick = mode === 'meaning' ? (e: VocabEntry) => e.meaning : mode === 'reading' ? (e: VocabEntry) => e.reading : (e: VocabEntry) => e.id
+        const legalStrings = new Set(eligible(entry).map(pick))
+        for (const option of q.options) {
+          if (option !== q.correct) expect(legalStrings.has(option)).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('draws distractors from the nearest-shape slice of the pool', () => {
+    const [target] = VPOOL
+    const [q] = buildVocabQuiz('reverse', [target], VOCAB_DATA, mulberry32(5))
+    const ranked = eligible(target)
+      .map((entry) => shapeScore(target, entry))
+      .sort((a, b) => a - b)
+    const cutoff = ranked[Math.min(23, ranked.length - 1)]
+    for (const option of q.options) {
+      if (option === q.correct) continue
+      const other = VOCAB_DATA.find((e) => e.id === option)!
+      expect(shapeScore(target, other)).toBeLessThanOrEqual(cutoff)
+    }
+  })
+
+  it('mixed resolves only to meaning/reading/reverse and eventually uses all three', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const quiz = buildVocabQuiz('mixed', VPOOL, VOCAB_DATA, mulberry32(seed))
+      for (const q of quiz) {
+        expect(['meaning', 'reading', 'reverse']).toContain(q.mode)
+      }
+    }
+    const seen = new Set<string>()
+    for (let seed = 1; seed <= 50; seed++) {
+      const [q] = buildVocabQuiz('mixed', VPOOL.slice(0, 1), VOCAB_DATA, mulberry32(seed))
+      seen.add(q.mode)
+    }
+    expect([...seen].sort()).toEqual(['meaning', 'reading', 'reverse'])
+  })
+
+  it('rejects cloze explicitly — sentences are not quizzed for vocab yet', () => {
+    expect(() => buildVocabQuiz('cloze', VPOOL, VOCAB_DATA, mulberry32(6))).toThrow(/cloze/i)
+  })
+
+  it('is deterministic for a given rng sequence', () => {
+    expect(buildVocabQuiz('mixed', VPOOL, VOCAB_DATA, mulberry32(7))).toEqual(
+      buildVocabQuiz('mixed', VPOOL, VOCAB_DATA, mulberry32(7)),
+    )
+  })
+})
+
+describe('selectVocabTargets', () => {
+  const NOW = new Date('2026-08-20T12:00:00Z').getTime()
+
+  function vocabCard(word: VocabEntry, over: Partial<SrsCard> = {}): SrsCard {
+    return { ...createCard(`w:${word.id}`, VOCAB_DATA.indexOf(word), NOW), ...over }
+  }
+
+  function makePools() {
+    const words = VOCAB_DATA.slice(200)
+    return {
+      known: words.slice(0, 5).map((w) => vocabCard(w, { state: 'review', interval: 30, due: NOW + 30 * DAY_MS })),
+      progress: words.slice(5, 9).map((w) => vocabCard(w, { state: 'learning', step: 0, due: NOW + 60_000 })),
+      new: words.slice(9, 14).map((w) => vocabCard(w)),
+    }
+  }
+
+  it('merges the selected sources without duplicates', () => {
+    const pools = makePools()
+    const targets = selectVocabTargets(
+      { ...DEFAULT_QUIZ_CONFIG, sources: ['known', 'progress'], count: 100 },
+      pools,
+      NOW,
+      mulberry32(1),
+    )
+    expect(targets).toHaveLength(9)
+    expect(new Set(targets.map((t) => t.id)).size).toBe(9)
+  })
+
+  it('respects dueOnly and problematicOnly through the shared card filters', () => {
+    const pools = makePools()
+    const config: QuizConfig = { ...DEFAULT_QUIZ_CONFIG, sources: ['known'], count: 100, dueOnly: true }
+    expect(selectVocabTargets(config, pools, NOW, mulberry32(2))).toHaveLength(0)
+
+    pools.known[0].lapses = 1
+    const problematic = selectVocabTargets(
+      { ...config, dueOnly: false, problematicOnly: true },
+      pools,
+      NOW,
+      mulberry32(3),
+    )
+    expect(problematic.map((t) => t.id)).toEqual([bareId(pools.known[0].id)])
+  })
+
+  it('samples at most `count` targets', () => {
+    const pools = makePools()
+    const targets = selectVocabTargets(
+      { ...DEFAULT_QUIZ_CONFIG, sources: ['known', 'progress', 'new'], count: 4 },
+      pools,
+      NOW,
+      mulberry32(4),
+    )
+    expect(targets).toHaveLength(4)
   })
 })

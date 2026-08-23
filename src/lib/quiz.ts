@@ -1,5 +1,6 @@
 import { getKanji, type KanjiEntry } from './kanji'
 import { getRadical, type RadicalEntry } from './radicals'
+import { getVocab, type VocabEntry } from './vocab'
 import { bareId, DAY_MS, STARTING_EASE, type SrsCard } from './srs'
 import type { QuizPools } from './db'
 
@@ -38,6 +39,8 @@ interface QuestionBase {
   correct: string
   /** 4 shuffled options; exactly one equals `correct`. */
   options: string[]
+  /** Reading-mode vocab prompts hide their furigana — it would show the answer. */
+  hideFurigana?: boolean
 }
 
 export interface KanjiQuestion extends QuestionBase {
@@ -61,7 +64,19 @@ export interface RadicalQuestion extends QuestionBase {
   keyword: string
 }
 
-export type QuizQuestion = KanjiQuestion | RadicalQuestion
+export interface VocabQuestion extends QuestionBase {
+  kind: 'vocab'
+  /** Vocab never asks cloze questions. */
+  mode: Exclude<QuestionMode, 'cloze'>
+  /** The word form the question is about (its bare card id). */
+  vocabId: string
+  reading: string
+  meaning: string
+  /** Furigana HTML for rendering the prompt; set only when showing it is safe. */
+  furiganaHtml?: string
+}
+
+export type QuizQuestion = KanjiQuestion | RadicalQuestion | VocabQuestion
 
 export interface SelectQuizOpts {
   now?: number
@@ -207,6 +222,135 @@ export function selectRadicalTargets(
     if (seen.has(glyph)) continue
     seen.add(glyph)
     candidates.push(getRadical(glyph))
+  }
+  return sampleKanji(candidates, config.count, rng)
+}
+
+/**
+ * Vocab quiz (Etap 4): meaning / reading / reverse over the word pool.
+ * `mixed` resolves to one of the three per question; cloze is kanji-only.
+ */
+const VOCAB_MODES = ['meaning', 'reading', 'reverse'] as const
+
+export function buildVocabQuiz(
+  mode: QuizMode,
+  targets: VocabEntry[],
+  all: VocabEntry[],
+  rng: () => number = Math.random,
+): VocabQuestion[] {
+  if (mode === 'cloze') throw new Error('Cloze mode is kanji-only')
+  return targets.map((entry, index) => {
+    const questionMode =
+      mode === 'mixed' ? VOCAB_MODES[Math.floor(rng() * VOCAB_MODES.length)] : mode
+    return buildVocabQuestion(questionMode, entry, index, all, rng)
+  })
+}
+
+/** How deep into the shape-ranked pool random sampling may reach. */
+const SIMILAR_WINDOW = 24
+
+function buildVocabQuestion(
+  mode: 'meaning' | 'reading' | 'reverse',
+  entry: VocabEntry,
+  index: number,
+  all: VocabEntry[],
+  rng: () => number,
+): VocabQuestion {
+  const question: VocabQuestion = {
+    kind: 'vocab',
+    index,
+    mode,
+    vocabId: entry.id,
+    reading: entry.reading,
+    meaning: entry.meaning,
+    prompt: '',
+    correct: '',
+    options: [],
+  }
+  // Distractors are drawn from the nearest-shape slice of the filtered pool,
+  // so the similarity ranking actually constrains the sample. Strings equal
+  // to the correct answer (same reading/meaning on another word) never qualify.
+  const distractors = (pick: (e: VocabEntry) => string, correct: string): string[] =>
+    [...new Set(vocabCandidates(entry, all).map(pick))]
+      .filter((value) => value && value !== correct)
+      .slice(0, SIMILAR_WINDOW)
+  switch (mode) {
+    case 'meaning': {
+      question.prompt = entry.id
+      question.furiganaHtml = entry.furiganaHtml
+      question.correct = entry.meaning
+      question.options = buildOptions(
+        question.correct,
+        distractors((e) => e.meaning, question.correct),
+        3,
+        rng,
+      )
+      return question
+    }
+    case 'reading': {
+      // Furigana would spell out the answer above the prompt — hide it (#Etap4).
+      question.prompt = entry.id
+      question.hideFurigana = true
+      question.correct = entry.reading
+      question.options = buildOptions(
+        question.correct,
+        distractors((e) => e.reading, question.correct),
+        3,
+        rng,
+      )
+      return question
+    }
+    case 'reverse': {
+      question.prompt = entry.meaning
+      question.correct = entry.id
+      question.options = buildOptions(
+        question.correct,
+        distractors((e) => e.id, question.correct),
+        3,
+        rng,
+      )
+      return question
+    }
+  }
+}
+
+/**
+ * Distractor pool for one vocab target: every other word that shares none of
+ * its glosses (`targetMeanings` pattern extended to all glosses on both sides,
+ * decision #14), nearest by word length and kanji share first. Sorting is
+ * stable, so ties keep their ranking order.
+ */
+function vocabCandidates(target: VocabEntry, all: VocabEntry[]): VocabEntry[] {
+  const targetGlosses = new Set([target.meaning, ...target.meanings])
+  const targetLength = [...target.id].length
+  const shaped: { entry: VocabEntry; score: number }[] = []
+  for (const entry of all) {
+    if (entry.id === target.id) continue
+    const glosses = [entry.meaning, ...entry.meanings]
+    if (glosses.some((gloss) => targetGlosses.has(gloss))) continue
+    const score =
+      Math.abs([...entry.id].length - targetLength) +
+      Math.abs(entry.kanji.length - target.kanji.length)
+    shaped.push({ entry, score })
+  }
+  return shaped.sort((a, b) => a.score - b.score).map(({ entry }) => entry)
+}
+
+/** Sample vocab quiz targets from snapshotted pools; same source semantics as kanji. */
+export function selectVocabTargets(
+  config: Pick<QuizConfig, 'sources' | 'count' | 'dueOnly' | 'problematicOnly'>,
+  pools: QuizPools,
+  now: number,
+  rng: () => number = Math.random,
+): VocabEntry[] {
+  const seen = new Set<string>()
+  const candidates: VocabEntry[] = []
+  for (const card of config.sources.flatMap((source) => pools[source] ?? [])) {
+    if (!passesFilters(card, config, now)) continue
+    const id = bareId(card.id)
+    if (seen.has(id)) continue
+    seen.add(id)
+    candidates.push(getVocab(id))
   }
   return sampleKanji(candidates, config.count, rng)
 }

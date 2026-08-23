@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { getAllDrawings, getCard, getSettings, markIgnored, markKnown, type Settings } from '../lib/db'
 import { getKanji } from '../lib/kanji'
 import { getRadical } from '../lib/radicals'
+import { getVocab } from '../lib/vocab'
 import { bareId, cardId, typeOf, type ContentType, type Rating, type SrsCard } from '../lib/srs'
 import {
   useStudySession,
@@ -11,6 +12,7 @@ import {
 import { KanjiDetail } from './KanjiDetail'
 import { RadicalCard } from './RadicalCard'
 import { StudyCard } from './StudyCard'
+import { VocabCard } from './VocabCard'
 
 interface SessionViewProps {
   kind: SessionKind
@@ -113,6 +115,18 @@ export function SessionView({ kind, type = 'kanji', title, onExit }: SessionView
                 onSelectKanji={(kanji) => {
                   getCard(cardId('kanji', kanji)).then((card) => card && setSelected(card))
                 }}
+              />
+            ) : typeOf(current.id) === 'vocab' ? (
+              <VocabCard
+                entry={getVocab(bareId(current.id))}
+                card={current}
+                revealed={revealed}
+                onReveal={reveal}
+                onRate={rate}
+                onSelectKanji={(kanji) => {
+                  getCard(cardId('kanji', kanji)).then((card) => card && setSelected(card))
+                }}
+                onIgnore={session.canIgnore ? session.ignore : undefined}
               />
             ) : (
               <StudyCard

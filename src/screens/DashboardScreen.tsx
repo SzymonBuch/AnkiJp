@@ -12,6 +12,7 @@ interface DashboardScreenProps {
 const SESSION_TYPES: { type: ContentType; label: string }[] = [
   { type: 'kanji', label: 'Kanji' },
   { type: 'radical', label: 'Radicals' },
+  { type: 'vocab', label: 'Words' },
 ]
 
 export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
@@ -85,7 +86,7 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
         />
         <NavButton
           label="Deck"
-          description="Browse radicals and kanji"
+          description="Browse radicals, kanji and words"
           onClick={() => onNavigate('deck')}
         />
         <NavButton

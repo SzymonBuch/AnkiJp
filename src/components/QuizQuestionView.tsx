@@ -1,4 +1,5 @@
 import type { QuestionMode, QuizQuestion } from '../lib/quiz'
+import { Furigana } from './Furigana'
 import { TypeBadge } from './TypeBadge'
 
 interface QuizQuestionViewProps {
@@ -17,6 +18,25 @@ const INSTRUCTION: Record<QuestionMode, string> = {
   cloze: 'Choose the fitting kanji',
 }
 
+const VOCAB_INSTRUCTION: Record<'meaning' | 'reading' | 'reverse', string> = {
+  reading: 'Choose the reading',
+  meaning: 'Choose the meaning',
+  reverse: 'Choose the word',
+}
+
+function instructionFor(question: QuizQuestion): string {
+  if (question.kind === 'vocab') return VOCAB_INSTRUCTION[question.mode]
+  return INSTRUCTION[question.mode]
+}
+
+/** Glyph prompts stay huge; word and text prompts scale to stay legible. */
+function promptClasses(question: QuizQuestion): string {
+  const base = 'select-none font-medium leading-snug [overflow-wrap:anywhere]'
+  if (question.kind === 'vocab') return `${base} text-4xl sm:text-5xl`
+  if (question.mode === 'reverse') return `${base} text-6xl`
+  return 'select-none text-[9rem] font-semibold leading-none sm:text-[11rem]'
+}
+
 export function QuizQuestionView({
   question,
   index,
@@ -26,7 +46,6 @@ export function QuizQuestionView({
   onNext,
 }: QuizQuestionViewProps) {
   const answered = selection !== null
-  const isReverse = question.mode === 'reverse'
   const isCloze = question.mode === 'cloze'
 
   return (
@@ -37,13 +56,13 @@ export function QuizQuestionView({
         </span>
         <span className="flex items-center gap-2">
           {/* Identical fronts (`r:一` vs `k:一`) are disambiguated by type. */}
-          <TypeBadge type={question.kind === 'radical' ? 'radical' : 'kanji'} />
+          <TypeBadge type={question.kind === 'radical' ? 'radical' : question.kind === 'vocab' ? 'vocab' : 'kanji'} />
           {question.kind === 'kanji' && (
             <span className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs font-semibold text-slate-500 dark:border-slate-600 dark:text-slate-400">
               G{question.grade}
             </span>
           )}
-          <span className="text-slate-400 dark:text-slate-500">{INSTRUCTION[question.mode]}</span>
+          <span className="text-slate-400 dark:text-slate-500">{instructionFor(question)}</span>
         </span>
       </div>
 
@@ -53,13 +72,15 @@ export function QuizQuestionView({
         </div>
       ) : (
         <div className="flex flex-col items-center gap-2 py-6">
-          <div
-            className={`select-none leading-none ${
-              isReverse ? 'text-6xl font-medium' : 'text-[9rem] font-semibold sm:text-[11rem]'
-            }`}
-          >
-            {question.prompt}
-          </div>
+          {question.kind === 'vocab' && question.furiganaHtml && !question.hideFurigana ? (
+            // Word prompts render their bundled furigana — except in reading
+            // mode, where it would reveal the answer (hideFurigana).
+            <div className="select-none text-5xl font-semibold leading-snug sm:text-6xl">
+              <Furigana html={question.furiganaHtml} />
+            </div>
+          ) : (
+            <div className={promptClasses(question)}>{question.prompt}</div>
+          )}
         </div>
       )}
 

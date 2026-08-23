@@ -32,6 +32,7 @@ import {
 } from './db'
 import { KANJI_DATA } from './kanji'
 import { RADICALS_DATA } from './radicals'
+import { VOCAB_DATA } from './vocab'
 import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
 import {
   DAY_MS,
@@ -59,8 +60,11 @@ describe('seeding', () => {
     expect(cards[0].id).toBe('k:一')
     expect(cards[0].state).toBe('new')
 
+    // Vocab materialization is continuous (Etap 4), so totals are compared
+    // per run: a second pass must not duplicate anything.
+    const total = cards.length
     await ensureSeeded()
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
+    expect(await getAllCards()).toHaveLength(total)
   })
 
   it('seeds radicals in usage-ranking order with fresh states', async () => {
@@ -111,8 +115,12 @@ describe('answerCard', () => {
   })
 
   it('rejects answers for never-materialized cards instead of creating ghosts', async () => {
+    // 食べる is in the vocab ranking but stays unmaterialized until 食 is seen.
     await expect(answerCard('w:食べる', 'good', NOW)).rejects.toThrow(/unknown card/i)
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
+    expect(await getCard('w:食べる')).toBeUndefined()
+    expect((await getAllCards()).filter((c) => typeOf(c.id) !== 'vocab')).toHaveLength(
+      KANJI_DATA.length + RADICALS_DATA.length,
+    )
     expect(await getLogs()).toHaveLength(0)
   })
 })
@@ -355,6 +363,137 @@ describe('content types', () => {
       expect((await getCard(id))!.ignored).toBe(false)
     })
   })
+
+  describe('lazy vocab materialization (Etap 4)', () => {
+    const KANA_ONLY = VOCAB_DATA.filter((e) => e.kanji.length === 0)
+
+    const vocabCards = async () =>
+      (await getAllCards()).filter((c) => typeOf(c.id) === 'vocab')
+
+    it('materializes unlocked words in ranking order up to the daily budget', async () => {
+      await setSettings({ newPerDayVocab: 2 })
+      await resetProgress()
+
+      const q = await getSessionQueue('vocab', NOW)
+      expect(q.fresh.map((c) => c.id)).toEqual(KANA_ONLY.slice(0, 2).map((e) => `w:${e.id}`))
+      // pos mirrors the top-2000 rank (decision #15).
+      for (const card of q.fresh) {
+        expect(card.pos).toBe(VOCAB_DATA.findIndex((e) => e.id === bareId(card.id)))
+      }
+    })
+
+    it('never duplicates an existing card across rebuilds and leaves states untouched', async () => {
+      const first = await getSessionQueue('vocab', NOW)
+      expect(first.fresh.length).toBeGreaterThan(0)
+      await getSummary('vocab', NOW)
+      await getKnownPool('vocab')
+      await getQuizPools('vocab')
+      const ids = (await vocabCards()).map((c) => c.id)
+      expect(new Set(ids).size).toBe(ids.length)
+      for (const card of first.fresh) {
+        expect(await getCard(card.id)).toEqual(card)
+      }
+    })
+
+    it('surfaces a word once its last kanji has been answered', async () => {
+      // 思う is the first kanji-bearing word of the ranking (rank 10); the ten
+      // words ahead of it are pure-kana and pass trivially (#12).
+      const word = VOCAB_DATA.find((e) => e.kanji.length === 1)!
+      await setSettings({ newPerDayVocab: 20 })
+      await resetProgress()
+      expect(await getCard(`w:${word.id}`)).toBeUndefined()
+
+      // Answering its only kanji makes the word eligible, but the new-card
+      // inventory is full — nothing materializes until a rebuild has room.
+      await answerCard(cardId('kanji', word.kanji[0]), 'good', NOW)
+      expect(await getCard(`w:${word.id}`)).toBeUndefined()
+
+      // Studying a word frees an inventory slot; the next rebuild tops up by
+      // rank and the freshly unlocked word jumps into the fresh queue.
+      await answerCard('w:と', 'good', NOW)
+      const q = await getSessionQueue('vocab', NOW + MIN_MS)
+      expect(await getCard(`w:${word.id}`)).toMatchObject({
+        state: 'new',
+        pos: VOCAB_DATA.indexOf(word),
+      })
+      expect(q.fresh.map((c) => c.id)).toContain(`w:${word.id}`)
+    })
+
+    it('keeps multi-kanji words gated until every one of their kanji is seen (#8)', async () => {
+      const word = VOCAB_DATA.find((e) => e.kanji.length >= 2)!
+      await setSettings({ newPerDayVocab: 5 })
+      await resetProgress()
+
+      // One kanji seen is not enough — even a rebuild with inventory room
+      // leaves the word unmaterialized.
+      await answerCard(cardId('kanji', word.kanji[0]), 'good', NOW)
+      await answerCard('w:と', 'good', NOW)
+      await getSessionQueue('vocab', NOW + MIN_MS)
+      expect(await getCard(`w:${word.id}`)).toBeUndefined()
+
+      // Once every kanji has been seen, the next rebuild materializes it.
+      for (const glyph of word.kanji.slice(1)) {
+        await answerCard(cardId('kanji', glyph), 'good', NOW)
+      }
+      await setSettings({ newPerDayVocab: VOCAB_DATA.length })
+      await getSessionQueue('vocab', NOW + MIN_MS)
+      expect(await getCard(`w:${word.id}`)).toMatchObject({ state: 'new' })
+    })
+
+    it('caps introductions per day while keeping a topped-up inventory', async () => {
+      await setSettings({ newPerDayVocab: 2 })
+      await resetProgress()
+
+      const [a, b] = KANA_ONLY
+      const first = await getSessionQueue('vocab', NOW)
+      expect(first.fresh.map((c) => c.id)).toEqual([`w:${a.id}`, `w:${b.id}`])
+
+      await answerCard(`w:${a.id}`, 'good', NOW)
+      await answerCard(`w:${b.id}`, 'good', NOW)
+
+      // Today's introductions are spent — nothing more is offered today…
+      expect((await getSessionQueue('vocab', NOW)).fresh).toHaveLength(0)
+      // …but the rebuilds kept the new-card inventory at the limit, and the
+      // queue reopens with it the next day.
+      const pending = (await vocabCards()).filter((c) => c.state === 'new')
+      expect(pending.map((c) => c.id).sort()).toEqual(
+        KANA_ONLY.slice(2, 4).map((e) => `w:${e.id}`).sort(),
+      )
+      const tomorrow = NOW + DAY_MS
+      expect((await getSessionQueue('vocab', tomorrow)).fresh.map((c) => c.id)).toEqual(
+        KANA_ONLY.slice(2, 4).map((e) => `w:${e.id}`),
+      )
+    })
+
+    it('feeds summaries and quiz pools like any other content type', async () => {
+      // Settle: a limit covering the whole ranking materializes every unlocked
+      // word at once, so later rebuilds have nothing left to add.
+      await setSettings({ newPerDayVocab: VOCAB_DATA.length })
+      await resetProgress()
+
+      const cards = (await vocabCards()).sort((a, b) => a.pos - b.pos)
+      expect(cards.map((c) => c.id)).toEqual(KANA_ONLY.map((e) => `w:${e.id}`))
+
+      const summary = await getSummary('vocab', NOW)
+      expect(summary.fresh).toBe(KANA_ONLY.length)
+
+      const pools = await getQuizPools('vocab')
+      expect(pools.new.map((c) => c.id)).toEqual(cards.map((c) => c.id))
+      for (const card of [...pools.known, ...pools.progress, ...pools.new]) {
+        expect(typeOf(card.id)).toBe('vocab')
+      }
+
+      const target = cards[0]
+      await markKnown(target.id, true, NOW)
+      const after = await getQuizPools('vocab')
+      expect(after.known.map((c) => c.id)).toContain(target.id)
+      expect(after.new.map((c) => c.id)).not.toContain(target.id)
+      expect((await getKnownPool('vocab')).ids).toContain(target.id)
+      const summaryAfter = await getSummary('vocab', NOW)
+      expect(summaryAfter.known).toBe(1)
+      expect(summaryAfter.fresh).toBe(KANA_ONLY.length - 1)
+    })
+  })
 })
 
 describe('settings', () => {
@@ -464,10 +603,11 @@ describe('quiz pools', () => {
 
   it('is read-only: repeated calls never change cards or write logs', async () => {
     await answerCard(cardId('kanji', KANJI_DATA[0].kanji), 'good', NOW)
+    const before = (await getAllCards()).filter((c) => typeOf(c.id) !== 'vocab')
     await getQuizPools()
     await getQuizPools()
     expect(await getLogs()).toHaveLength(1)
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
+    expect((await getAllCards()).filter((c) => typeOf(c.id) !== 'vocab')).toEqual(before)
   })
 })
 
@@ -648,7 +788,9 @@ describe('known pool', () => {
     await getKnownPool('kanji')
     await getKnownPool('kanji')
     expect(await getLogs()).toHaveLength(0)
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
+    expect((await getAllCards()).filter((c) => typeOf(c.id) !== 'vocab')).toHaveLength(
+      KANJI_DATA.length + RADICALS_DATA.length,
+    )
     expect(await getCard(cardId('kanji', KANJI_DATA[0].kanji))).toMatchObject({
       state: 'new',
       reps: 0,
@@ -936,7 +1078,9 @@ describe('v2 → v3 migration', () => {
     // The adoption survives a simulated reload.
     closeDb()
     expect(await getSeedStamp()).toEqual({ seeded: ['kanji', 'radical'] })
-    expect(await getAllCards()).toHaveLength(2 + RADICALS_DATA.length)
+    const after = await getAllCards()
+    expect(after.filter((c) => typeOf(c.id) === 'kanji')).toHaveLength(2)
+    expect(after.filter((c) => typeOf(c.id) === 'radical')).toHaveLength(RADICALS_DATA.length)
   })
 
   it('applies migration rule B while seeding radicals (#11): components of seen kanji start known', async () => {
@@ -1013,7 +1157,9 @@ describe('seed stamp', () => {
     // Reset wipes the rule-B state too: radicals come back fresh.
     expect((await getCard('r:口'))).toMatchObject({ state: 'new', known: false })
     expect(await getLogs()).toHaveLength(0)
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
+    expect((await getAllCards()).filter((c) => typeOf(c.id) !== 'vocab')).toHaveLength(
+      KANJI_DATA.length + RADICALS_DATA.length,
+    )
   })
 })
 
@@ -1045,7 +1191,9 @@ describe('resetProgress', () => {
     await resetProgress()
     expect(await getCard('k:一')).toMatchObject({ state: 'new', reps: 0, known: false })
     expect(await getLogs()).toHaveLength(0)
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
+    expect((await getAllCards()).filter((c) => typeOf(c.id) !== 'vocab')).toHaveLength(
+      KANJI_DATA.length + RADICALS_DATA.length,
+    )
   })
 })
 

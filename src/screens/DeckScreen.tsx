@@ -3,6 +3,7 @@ import { DrawingPad } from '../components/DrawingPad'
 import { KanjiDetail } from '../components/KanjiDetail'
 import { RadicalDetail } from '../components/RadicalDetail'
 import { RadicalGlyph } from '../components/RadicalGlyph'
+import { VocabDetail } from '../components/VocabDetail'
 import {
   deleteDrawing,
   getAllCards,
@@ -18,6 +19,7 @@ import { buildGateContext, isKanjiUnlocked, missingComponents } from '../lib/gat
 import { getKanji } from '../lib/kanji'
 import { DAY_MS, bareId, cardId, typeOf, type ContentType, type SrsCard } from '../lib/srs'
 import { getRadical } from '../lib/radicals'
+import { getVocab } from '../lib/vocab'
 
 type Filter = 'all' | 'new' | 'learning' | 'due' | 'known' | 'ignored'
 type CardStatus = Exclude<Filter, 'all'> | 'scheduled'
@@ -41,6 +43,7 @@ interface DeckScreenProps {
 const TABS: { type: ContentType; label: string }[] = [
   { type: 'kanji', label: 'Kanji' },
   { type: 'radical', label: 'Radicals' },
+  { type: 'vocab', label: 'Words' },
 ]
 
 const FILTERS: { value: Filter; label: string }[] = [
@@ -126,13 +129,22 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
     return rows.filter((row) => {
       if (filter !== 'all' && row.status !== filter) return false
       if (!needle) return true
-      const glyph = bareId(row.card.id)
+      const id = bareId(row.card.id)
       if (tab === 'radical') {
-        return glyph.includes(needle) || getRadical(glyph).keyword.toLowerCase().includes(needle)
+        return id.includes(needle) || getRadical(id).keyword.toLowerCase().includes(needle)
       }
-      const entry = getKanji(glyph)
+      if (tab === 'vocab') {
+        const entry = getVocab(id)
+        return (
+          id.includes(needle) ||
+          entry.reading.includes(needle) ||
+          entry.meaning.toLowerCase().includes(needle) ||
+          entry.meanings.some((m) => m.toLowerCase().includes(needle))
+        )
+      }
+      const entry = getKanji(id)
       return (
-        glyph.includes(needle) ||
+        id.includes(needle) ||
         entry.meaning.toLowerCase().includes(needle) ||
         entry.kun.some((k) => k.toLowerCase().includes(needle)) ||
         entry.on.some((o) => o.toLowerCase().includes(needle))
@@ -245,9 +257,17 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
             placeholder={
               tab === 'radical'
                 ? 'Search radical glyph or keyword…'
-                : 'Search kanji, meaning or reading…'
+                : tab === 'vocab'
+                  ? 'Search word, meaning or reading…'
+                  : 'Search kanji, meaning or reading…'
             }
-            aria-label={tab === 'radical' ? 'Search radicals' : 'Search kanji'}
+            aria-label={
+              tab === 'radical'
+                ? 'Search radicals'
+                : tab === 'vocab'
+                  ? 'Search words'
+                  : 'Search kanji'
+            }
             className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-slate-400 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-slate-500"
           />
 
@@ -325,7 +345,11 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
                 type="button"
                 onClick={() => setSelected(card)}
                 aria-label={`${bareId(card.id)} — ${status}`}
-                className={`flex aspect-square min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-2xl font-semibold shadow-sm transition active:scale-90 sm:text-3xl dark:border-slate-700 dark:bg-slate-900 ${CELL_COLOR[status]}`}
+                className={`flex aspect-square min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white shadow-sm transition active:scale-90 dark:border-slate-700 dark:bg-slate-900 ${CELL_COLOR[status]} ${
+                  tab === 'vocab'
+                    ? 'px-1 text-base font-semibold [overflow-wrap:anywhere] sm:text-lg'
+                    : 'text-2xl font-semibold sm:text-3xl'
+                }`}
               >
                 {typeOf(card.id) === 'radical' ? (
                   <RadicalGlyph glyph={bareId(card.id)} />
@@ -359,6 +383,18 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
           onToggleIgnored={(ignored) => toggleIgnored(selected.id, ignored)}
           onDraw={() => setPadOpen(true)}
           onDeleteDrawing={removeDrawing}
+          onClose={() => setSelected(null)}
+        />
+      )}
+
+      {selected && settings && typeOf(selected.id) === 'vocab' && (
+        <VocabDetail
+          entry={getVocab(bareId(selected.id))}
+          card={selected}
+          settings={settings}
+          onToggleKnown={(known) => toggleKnown(selected.id, known)}
+          onToggleIgnored={(ignored) => toggleIgnored(selected.id, ignored)}
+          onSelectKanji={openKanjiFromRadical}
           onClose={() => setSelected(null)}
         />
       )}

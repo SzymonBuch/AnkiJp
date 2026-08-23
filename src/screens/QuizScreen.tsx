@@ -10,6 +10,12 @@ interface QuizScreenProps {
   onExit: () => void
 }
 
+const TITLES: Record<ContentType, string> = {
+  kanji: 'Quiz',
+  radical: 'Radical quiz',
+  vocab: 'Word quiz',
+}
+
 export function QuizScreen({ type = 'kanji', onExit }: QuizScreenProps) {
   const quiz = useQuizSession(type)
 
@@ -33,7 +39,7 @@ export function QuizScreen({ type = 'kanji', onExit }: QuizScreenProps) {
     <div className="flex min-h-svh flex-col">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
         <div className="mx-auto flex max-w-xl items-center justify-between">
-          <h1 className="text-lg font-semibold">{type === 'radical' ? 'Radical quiz' : 'Quiz'}</h1>
+            <h1 className="text-lg font-semibold">{TITLES[type]}</h1>
           <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
             <button
               type="button"

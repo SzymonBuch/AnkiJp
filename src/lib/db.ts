@@ -14,8 +14,9 @@ import {
 } from './srs'
 import { KANJI_DATA, getKanji } from './kanji'
 import { RADICALS_DATA } from './radicals'
+import { VOCAB_DATA } from './vocab'
 import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
-import { buildGateContext, isComponentSeen, isKanjiUnlocked } from './gating'
+import { buildGateContext, isComponentSeen, isKanjiUnlocked, isVocabUnlocked } from './gating'
 
 export const DB_NAME = 'ankijp'
 export const DB_VERSION = 3
@@ -232,6 +233,40 @@ export async function ensureSeeded(): Promise<void> {
     await seedRadicals()
     await stampSeeded(db, 'radical')
   }
+  // Vocabulary is never stamped: its materialization is continuous, driven by
+  // gating and the daily budget (every queue/summary/pool build lands here).
+  await materializeVocab(Date.now())
+}
+
+/**
+ * Lazy vocab seeding (Etap 4): walk the ranked vocabulary and materialize one
+ * card per word whose kanji have all been seen (#8 — no exceptions; pure-kana
+ * words pass trivially, #12). The daily budget caps the *inventory* of
+ * outstanding new word cards: every rebuild tops it back up, so answering the
+ * last kanji of a word makes that word jump in at the very next queue build,
+ * while introductions themselves stay capped by the fresh-queue slice.
+ * Idempotent: an existing card — whatever its state — is never recreated;
+ * `pos` is the word's rank in the top-2000 (decision #15).
+ */
+async function materializeVocab(now: number): Promise<void> {
+  const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
+  let room = settings.newPerDayVocab
+  const existing = new Set<string>()
+  for (const card of cards) {
+    if (typeOf(card.id) !== 'vocab') continue
+    existing.add(card.id)
+    if (!card.ignored && card.state === 'new') room--
+  }
+  if (room <= 0) return
+  const ctx = buildGateContext(cards)
+  const fresh: SrsCard[] = []
+  for (const [pos, entry] of VOCAB_DATA.entries()) {
+    if (fresh.length >= room) break
+    if (existing.has(cardId('vocab', entry.id))) continue
+    if (!isVocabUnlocked(entry, ctx)) continue
+    fresh.push(createCard(cardId('vocab', entry.id), pos, now))
+  }
+  await bulkPutCards(fresh)
 }
 
 /**

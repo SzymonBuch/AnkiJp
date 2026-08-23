@@ -23,6 +23,14 @@ const RADICAL_MODES: { mode: QuizMode; title: string; description: string; glyph
   { mode: 'meaning', title: 'Meaning', description: 'Pick the keyword of a radical', glyph: '意' },
 ]
 
+/** Vocab quizzes come in the three card directions plus mixed (Etap 4). */
+const VOCAB_MODES: { mode: QuizMode; title: string; description: string; glyph: string }[] = [
+  { mode: 'meaning', title: 'Meaning', description: 'Pick the meaning of a word', glyph: '意' },
+  { mode: 'reading', title: 'Reading', description: 'Pick the reading of a word', glyph: '読' },
+  { mode: 'reverse', title: 'Reverse', description: 'Pick the word for a meaning', glyph: '逆' },
+  { mode: 'mixed', title: 'Mixed', description: 'Random mode per question', glyph: '混' },
+]
+
 interface QuizSetupProps {
   type: ContentType
   config: QuizConfig
@@ -49,7 +57,8 @@ export function QuizSetup({
   const count = Math.min(config.count, Math.max(maxCount, 1))
   const extraNew = Math.min(config.extraNew, maxExtraNew)
   const setSize = Math.min(config.count, maxCount) + extraNew
-  const modes = type === 'radical' ? RADICAL_MODES : MODES
+  const modes =
+    type === 'radical' ? RADICAL_MODES : type === 'vocab' ? VOCAB_MODES : MODES
 
   const toggleSource = (source: QuizSource) => {
     const has = config.sources.includes(source)
@@ -102,6 +111,11 @@ export function QuizSetup({
               Grade
             </h3>
             <div className="flex flex-wrap gap-2">
+              <Chip
+                label="G0"
+                pressed={config.grades.includes(0)}
+                onClick={() => toggleGrade(0)}
+              />
               {GRADES.map((grade) => (
                 <Chip
                   key={grade}
@@ -111,6 +125,11 @@ export function QuizSetup({
                 />
               ))}
             </div>
+            {!config.grades.includes(0) && (
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                G0 covers the extra kanji that entered the deck through the top-2000 vocabulary.
+              </p>
+            )}
           </div>
         )}
 
@@ -159,7 +178,9 @@ export function QuizSetup({
         <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-center text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
           {type === 'radical'
             ? 'No radicals match these sources. Enable more sources — quizable radicals appear as you study them.'
-            : 'No kanji matches these sources and filters. Enable more sources, relax the filters, or add new kanji with “+ New kanji”.'}
+            : type === 'vocab'
+              ? 'No words match these sources. Enable more sources — quizable words appear as you study their kanji.'
+              : 'No kanji matches these sources and filters. Enable more sources, relax the filters, or add new kanji with “+ New kanji”.'}
         </p>
       )}
 

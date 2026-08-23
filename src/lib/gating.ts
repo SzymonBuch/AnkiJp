@@ -1,5 +1,6 @@
 import { getKanji, type KanjiEntry } from './kanji'
 import { bareId, cardId, typeOf, type SrsCard } from './srs'
+import type { VocabEntry } from './vocab'
 
 export interface GateContext {
   /** Ids of cards seen at least once (state ≠ `new`), any content type. */
@@ -55,4 +56,14 @@ export function missingComponents(entry: KanjiEntry, ctx: GateContext): string[]
   return entry.radicals
     .filter(({ glyph }) => glyph !== entry.kanji && !isComponentSeen(glyph, ctx))
     .map(({ glyph }) => glyph)
+}
+
+/**
+ * A word becomes introducible once every kanji it uses has been seen (#8, no
+ * exceptions — every vocab kanji exists in the deck). Seeing the kanji itself
+ * is required: unlocking it via components is not enough, so words follow
+ * their kanji in study order. Pure-kana words pass trivially (#12).
+ */
+export function isVocabUnlocked(entry: VocabEntry, ctx: GateContext): boolean {
+  return entry.kanji.every((glyph) => ctx.seenIds.has(cardId('kanji', glyph)))
 }

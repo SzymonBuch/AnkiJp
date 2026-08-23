@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildGateContext, isComponentSeen, isKanjiUnlocked, missingComponents } from './gating'
+import { buildGateContext, isComponentSeen, isKanjiUnlocked, isVocabUnlocked, missingComponents } from './gating'
 import { KANJI_DATA } from './kanji'
 import { RADICALS_DATA } from './radicals'
+import { VOCAB_DATA } from './vocab'
 import { cardId, createCard, type SrsCard } from './srs'
 
 const NOW = 0
@@ -128,5 +129,40 @@ describe('missingComponents (Deck drill-down)', () => {
   it('never reports the self-fallback', () => {
     const empty = buildGateContext([])
     expect(missingComponents(SELF_ONLY, empty)).toEqual([])
+  })
+})
+
+describe('isVocabUnlocked (Etap 4: words follow their kanji)', () => {
+  const KANA_WORD = VOCAB_DATA.find((e) => e.kanji.length === 0)!
+  const MULTI_KANJI_WORD = VOCAB_DATA.find((e) => e.kanji.length >= 2)!
+
+  it('passes trivially for pure-kana words (decision #12)', () => {
+    const ctx = buildGateContext([])
+    expect(isVocabUnlocked(KANA_WORD, ctx)).toBe(true)
+  })
+
+  it('stays locked while any kanji of the word is unseen (#8, no exceptions)', () => {
+    const [first, second] = MULTI_KANJI_WORD.kanji
+    const partial = buildGateContext([card(cardId('kanji', first), 'review')])
+    expect(isVocabUnlocked(MULTI_KANJI_WORD, partial)).toBe(false)
+
+    const complete = buildGateContext(
+      MULTI_KANJI_WORD.kanji.map((glyph) => card(cardId('kanji', glyph), 'learning')),
+    )
+    expect(second).toBeDefined()
+    expect(isVocabUnlocked(MULTI_KANJI_WORD, complete)).toBe(true)
+  })
+
+  it('requires the kanji card itself — components of other kanji do not count', () => {
+    // Seeing glyph X as a component of another kanji makes the component
+    // "seen", but the word must wait for the actual card k:X to be studied.
+    const target = MULTI_KANJI_WORD.kanji[0]
+    const host = KANJI_DATA.find(
+      (e) => e.kanji !== target && e.radicals.some((r) => r.glyph === target),
+    )
+    if (!host) return
+    const ctx = buildGateContext([card(cardId('kanji', host.kanji), 'review')])
+    expect(ctx.componentsOfSeenKanji.has(target)).toBe(true)
+    expect(isVocabUnlocked(MULTI_KANJI_WORD, ctx)).toBe(false)
   })
 })

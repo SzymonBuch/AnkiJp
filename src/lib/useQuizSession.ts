@@ -2,14 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getQuizPools, getSettings, setSettings, type QuizPools } from './db'
 import { getKanji, KANJI_DATA } from './kanji'
 import { RADICALS_DATA } from './radicals'
+import { VOCAB_DATA } from './vocab'
 import {
   buildQuiz,
   buildRadicalQuiz,
+  buildVocabQuiz,
   DEFAULT_QUIZ_CONFIG,
   isClozeEligible,
   passesFilters,
   selectQuizTargets,
   selectRadicalTargets,
+  selectVocabTargets,
   type QuizConfig,
   type QuizMode,
   type QuizQuestion,
@@ -153,20 +156,25 @@ export function useQuizSession(type: ContentType = 'kanji'): QuizSession {
 
   const start = useCallback(
     (nextMode: QuizMode) => {
+      let built: QuizQuestion[]
       if (type === 'radical') {
         const targets = selectRadicalTargets(config, pools, snapshotAt)
         if (targets.length === 0) return
-        setMode(nextMode)
-        setQuestions(buildRadicalQuiz(targets, RADICALS_DATA))
+        built = buildRadicalQuiz(targets, RADICALS_DATA)
+      } else if (type === 'vocab') {
+        const targets = selectVocabTargets(config, pools, snapshotAt)
+        if (targets.length === 0) return
+        built = buildVocabQuiz(nextMode, targets, VOCAB_DATA)
       } else {
         const targets = selectQuizTargets(config, pools, {
           now: snapshotAt,
           predicate: nextMode === 'cloze' ? isClozeEligible : undefined,
         })
         if (targets.length === 0) return
-        setMode(nextMode)
-        setQuestions(buildQuiz(nextMode, targets, KANJI_DATA))
+        built = buildQuiz(nextMode, targets, KANJI_DATA)
       }
+      setMode(nextMode)
+      setQuestions(built)
       setCurrentIndex(0)
       setAnswers([])
       setSelection(null)

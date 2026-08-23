@@ -135,7 +135,7 @@ export function SettingsScreen({ onExit }: SettingsScreenProps) {
               />
               <NumberField
                 label="New words per day"
-                hint="Vocabulary arrives in a later stage; the limit applies once it exists."
+                hint="How many new words are introduced each day — words unlock as their kanji are studied."
                 value={draft.newPerDayVocab}
                 onChange={(raw) => updateNumber('newPerDayVocab', raw)}
               />

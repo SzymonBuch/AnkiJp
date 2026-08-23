@@ -50,7 +50,11 @@ export function QuizSummary({ mode, total, correctCount, answers, onRetake, onEx
               >
                 <div className="flex items-center gap-3">
                   <span className="text-2xl font-semibold leading-none">
-                    {answer.question.kind === 'radical' ? answer.question.glyph : answer.question.kanji}
+                    {answer.question.kind === 'radical'
+                      ? answer.question.glyph
+                      : answer.question.kind === 'vocab'
+                        ? answer.question.vocabId
+                        : answer.question.kanji}
                   </span>
                   <div>
                     <div className="text-sm text-slate-500 dark:text-slate-400">{answer.question.prompt}</div>
