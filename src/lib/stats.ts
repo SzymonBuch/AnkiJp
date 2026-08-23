@@ -1,4 +1,5 @@
 import type { ReviewLog } from './db'
+import { typeOf, type ContentType } from './srs'
 
 export const DAY_MS = 86_400_000
 
@@ -16,6 +17,23 @@ export interface DayStats {
   correct: number
 }
 
+/** Headline counters broken down per content type (Etap 6). */
+export interface TypeStats {
+  answers: number
+  newLearned: number
+  reviewsDone: number
+  /** % of the type's answers rated hard/good/easy. */
+  accuracy: number
+}
+
+/** Accumulator for one content type; `correct` folds into `accuracy` at the end. */
+interface TypeTally {
+  answers: number
+  newLearned: number
+  reviewsDone: number
+  correct: number
+}
+
 export interface OverallStats {
   totalAnswers: number
   newLearned: number
@@ -29,6 +47,8 @@ export interface OverallStats {
   /** Longest run of consecutive active days. */
   longestStreak: number
   daily: DayStats[]
+  /** Same counters per content type, derived from the card-id prefix. */
+  byType: Record<ContentType, TypeStats>
 }
 
 /** A rating counts as remembered unless the card was forgotten (Again). */
@@ -55,6 +75,11 @@ function noonMs(key: string): number {
  */
 export function computeStats(logs: ReviewLog[], now = Date.now()): OverallStats {
   const byDay = new Map<string, DayStats>()
+  const typeTally: Record<ContentType, TypeTally> = {
+    kanji: { answers: 0, newLearned: 0, reviewsDone: 0, correct: 0 },
+    radical: { answers: 0, newLearned: 0, reviewsDone: 0, correct: 0 },
+    vocab: { answers: 0, newLearned: 0, reviewsDone: 0, correct: 0 },
+  }
   for (const log of logs) {
     const key = isoDateKey(log.timestamp)
     let day = byDay.get(key)
@@ -66,6 +91,12 @@ export function computeStats(logs: ReviewLog[], now = Date.now()): OverallStats 
     if (log.prevState === 'new') day.newCards++
     else if (log.prevState === 'review') day.reviews++
     if (remembered(log.rating)) day.correct++
+
+    const tally = typeTally[typeOf(log.cardId)]
+    tally.answers++
+    if (log.prevState === 'new') tally.newLearned++
+    else if (log.prevState === 'review') tally.reviewsDone++
+    if (remembered(log.rating)) tally.correct++
   }
 
   const daily = [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date))
@@ -74,6 +105,12 @@ export function computeStats(logs: ReviewLog[], now = Date.now()): OverallStats 
   const reviewsDone = logs.filter((log) => log.prevState === 'review').length
   const reviewCorrect = logs.filter((log) => log.prevState === 'review' && remembered(log.rating)).length
   const newLearned = daily.reduce((sum, d) => sum + d.newCards, 0)
+  const byType = Object.fromEntries(
+    (Object.keys(typeTally) as ContentType[]).map((type) => {
+      const { correct: typeCorrect, ...counters } = typeTally[type]
+      return [type, { ...counters, accuracy: percent(typeCorrect, counters.answers) }]
+    }),
+  ) as Record<ContentType, TypeStats>
 
   return {
     totalAnswers,
@@ -84,6 +121,7 @@ export function computeStats(logs: ReviewLog[], now = Date.now()): OverallStats 
     currentStreak: currentStreakOf(dayKeys(daily), now),
     longestStreak: longestStreakOf(dayKeys(daily)),
     daily,
+    byType,
   }
 }
 

@@ -9,24 +9,38 @@ interface DashboardScreenProps {
   onNavigate: (screen: Screen, type?: SessionType) => void
 }
 
-/** Content types with single-type study/review/quiz sessions. */
+/** Content types with single-type study/review/quiz sessions, topological order. */
 const SESSION_TYPES: { type: ContentType; label: string }[] = [
   { type: 'kanji', label: 'Kanji' },
   { type: 'radical', label: 'Radicals' },
   { type: 'vocab', label: 'Words' },
 ]
 
+const SUMMARY_KEYS = ['fresh', 'learning', 'due', 'future'] as const
+const SUMMARY_LABELS: Record<(typeof SUMMARY_KEYS)[number], string> = {
+  fresh: 'New',
+  learning: 'Learning',
+  due: 'Due',
+  future: 'Future',
+}
+
 export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
-  const [summary, setSummary] = useState<Summary | null>(null)
+  const [summaries, setSummaries] = useState<Record<ContentType, Summary> | null>(null)
   const [streak, setStreak] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([getSummary('kanji'), getLogs()]).then(([summaryResult, logs]) => {
+    // Per-type summaries (Etap 6): the dashboard shows the counters broken
+    // down per content type with a summed total row.
+    Promise.all([
+      getSummary('radical'),
+      getSummary('kanji'),
+      getSummary('vocab'),
+      getLogs(),
+    ]).then(([radical, kanji, vocab, logs]) => {
       if (cancelled) return
-      const stats = computeStats(logs)
-      setSummary(summaryResult)
-      setStreak(stats.currentStreak)
+      setSummaries({ radical, kanji, vocab })
+      setStreak(computeStats(logs).currentStreak)
     })
     return () => {
       cancelled = true
@@ -41,26 +55,21 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       <div className="text-center">
         <h1 className="text-3xl font-semibold">AnkiJp</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-300">
-          Learn kanji through their radicals with Anki-style SRS and quizzes.
+          Learn radicals, kanji and words in chained Anki-style sessions.
         </p>
       </div>
 
-      {summary && (
-        <div className="grid w-full max-w-sm grid-cols-2 gap-2 text-center sm:grid-cols-5">
-          <Counter label="New" value={summary.fresh} accent="text-slate-700 dark:text-slate-300" />
-          <Counter label="Learning" value={summary.learning} accent="text-amber-600 dark:text-amber-400" />
-          <Counter label="Due" value={summary.due} accent="text-red-600 dark:text-red-400" />
-          <Counter
-            label="Future reviews"
-            value={summary.future}
-            accent="text-blue-600 dark:text-blue-400"
-          />
-          <div className="rounded-xl border border-slate-200 bg-white px-1 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <div className="text-2xl font-bold tabular-nums text-green-700 dark:text-green-400" data-testid="dashboard-streak">
-              {streak}
-            </div>
-            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Day streak
+      {summaries && (
+        <div className="flex w-full max-w-sm flex-col gap-2" data-testid="dashboard-counters">
+          <CounterTable summaries={summaries} />
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <div className="text-center text-sm tabular-nums">
+              <span className="font-bold text-green-700 dark:text-green-400" data-testid="dashboard-streak">
+                {streak}
+              </span>{' '}
+              <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                day streak
+              </span>
             </div>
           </div>
         </div>
@@ -174,13 +183,76 @@ function NavButton({
   )
 }
 
-function Counter({ label, value, accent }: { label: string; value: number; accent: string }) {
+/** Per-type counters (Etap 6): one row per content type plus the summed total. */
+function CounterTable({ summaries }: { summaries: Record<ContentType, Summary> }) {
+  const total = {
+    fresh: 0,
+    learning: 0,
+    due: 0,
+    future: 0,
+  }
+  for (const { type } of SESSION_TYPES) {
+    for (const key of SUMMARY_KEYS) total[key] += summaries[type][key]
+  }
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-1 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <div className={`text-2xl font-bold tabular-nums ${accent}`}>{value}</div>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <table className="w-full text-sm tabular-nums" data-testid="dashboard-summary">
+        <thead>
+          <tr className="border-b border-slate-200 text-[11px] uppercase tracking-wide text-slate-400 dark:border-slate-700 dark:text-slate-500">
+            <th className="px-3 py-2 text-left font-medium" aria-label="Content type" />
+            {SUMMARY_KEYS.map((key) => (
+              <th key={key} className="px-2 py-2 text-right font-medium">
+                {SUMMARY_LABELS[key]}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {[...SESSION_TYPES].reverse().map(({ type, label }) => (
+            <CounterRow key={type} label={label} values={summaries[type]} />
+          ))}
+          <CounterRow label="Total" values={total} total />
+        </tbody>
+      </table>
     </div>
   )
+}
+
+function CounterRow({
+  label,
+  values,
+  total = false,
+}: {
+  label: string
+  values: Pick<Summary, (typeof SUMMARY_KEYS)[number]>
+  total?: boolean
+}) {
+  return (
+    <tr
+      className={`border-b border-slate-100 last:border-b-0 dark:border-slate-800 ${
+        total ? 'font-semibold' : ''
+      }`}
+    >
+      <td className="px-3 py-1.5 text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {label}
+      </td>
+      {SUMMARY_KEYS.map((key) => (
+        <td
+          key={key}
+          className={`px-2 py-1.5 text-right ${SUMMARY_ACCENTS[key]}`}
+        >
+          {values[key]}
+        </td>
+      ))}
+    </tr>
+  )
+}
+
+const SUMMARY_ACCENTS: Record<(typeof SUMMARY_KEYS)[number], string> = {
+  fresh: 'text-slate-700 dark:text-slate-300',
+  learning: 'text-amber-600 dark:text-amber-400',
+  due: 'text-red-600 dark:text-red-400',
+  future: 'text-blue-600 dark:text-blue-400',
 }
 
 function Attribution() {
@@ -192,7 +264,10 @@ function Attribution() {
         <a className="underline" href="https://kanjiapi.dev" target="_blank" rel="noreferrer">kanjiapi.dev</a>{' '}
         from <a className="underline" href="https://www.edrdg.org/kanjidic/kanjidic.html" target="_blank" rel="noreferrer">KANJIDIC</a> (licensed under the EDRDG licence —{' '}
         <a className="underline" href="https://www.edrdg.org/edrdg/licence.html" target="_blank" rel="noreferrer">edrdg.org</a>
-        ); radicals, keywords and mnemonics by{' '}
+        ); vocabulary meanings and readings from{' '}
+        <a className="underline" href="https://www.edrdg.org/jmdict/j_jmdict.html" target="_blank" rel="noreferrer">JMdict</a>{' '}
+        via <a className="underline" href="https://github.com/scriptin/jmdict-simplified" target="_blank" rel="noreferrer">jmdict-simplified</a>{' '}
+        (EDRDG licence); radicals, keywords, mnemonics and the frequency ranking by{' '}
         <a className="underline" href="https://jpdb.io" target="_blank" rel="noreferrer">jpdb</a>;
         example sentences by{' '}
         <a className="underline" href="https://tatoeba.org" target="_blank" rel="noreferrer">Tatoeba</a>{' '}

@@ -1,14 +1,19 @@
 # AnkiJp
 
-PWA for learning the 1,006 joyo kanji with Anki-style SRS (SM-2) and quizzes in the style of kanjiquizzer.com. UI and translations are in English. Runs fully offline once installed.
+PWA for learning Japanese radicals, kanji and vocabulary with Anki-style SRS (SM-2) and quizzes in the style of kanjiquizzer.com. UI and translations are in English. Runs fully offline once installed.
 
 ## Features
 
-- Anki-style SM-2 spaced repetition (Again / Hard / Good / Easy) for all 1,006 教育漢字
-- Study new cards and review due cards in daily sessions
-- Quizzes over kanji you already know (reading, meaning, reverse) — isolated from SRS
-- Deck browser with status filters, search, and full card details
-- Statistics (reviews per day, retention, accuracy, streaks) from local history
+- Mixed sessions by default: radicals → kanji → words studied as one chain (single-type sessions stay available)
+- Anki-style SM-2 spaced repetition (Again / Hard / Good / Easy)
+  - Radicals: the jpdb components of the whole deck
+  - Kanji: the 教育漢字 deck plus a grade-0 extension covering the kanji used by the vocabulary
+  - Vocabulary: the top-2000 words by jpdb's frequency ranking (dictionary forms only)
+- Component gating: a kanji unlocks when all of its components have been seen; a word unlocks with its kanji
+- Daily new-card limits per content type, global review limit
+- Quizzes over known/in-progress/new cards (reading, meaning, reverse, cloze for kanji), mixed pool by default
+- Deck browser with per-type tabs, status filters, search, and full card details
+- Statistics from local history, broken down per content type
 - Fully offline: all data is bundled and SRS state lives in your browser's IndexedDB
 
 ## Stack
@@ -70,18 +75,26 @@ npm run build    # tsc + vite build
 
 ## Scripts
 
-`scripts/` holds the one-off data pipeline (fetching kanji list, jpdb scraping, mnemonic preparation, data assembly). See `PLAN.md` for the full roadmap.
+`scripts/` holds the one-off data pipeline. The deck size is never hard-coded: the kanji
+deck is the kyōiku set (grades 1–6) plus a grade-0 extension, and the vocabulary is the
+top-2000 by jpdb's frequency ranking — all counts fall out of the pipeline (see `PLAN.md`
+for the sourcing decisions).
 
 ### Data pipeline
 
-The data scripts (`src/data/kanji.json`) are generated from public sources:
+The bundled data (`src/data/kanji.json`, `src/data/radicals.json`, `src/data/vocab.json`)
+is generated from public sources:
 
 ```bash
-npm run data:kyoiku     # fetch 1,006 教育漢字 + readings/meanings from kanjiapi.dev
+npm run data:kyoiku     # fetch the 教育漢字 + readings/meanings from kanjiapi.dev
 npm run data:jpdb       # scrape jpdb.io kanji pages (cached in scripts/out/pages/)
-npm run data:tatoeba    # Tatoeba fallback sentences for kanji with few examples
+npm run data:vocab      # select top-2000 words by jpdb ranking; meanings/readings from JMdict
+npm run data:extend     # add grade-0 kanji used by the selected words to the deck
+npm run data:tatoeba    # Tatoeba fallback sentences for kanji and words with few examples
 npm run data:mnemonics  # list kanji still missing a mnemonic for AI fill-in
 npm run data:build      # merge everything into src/data/kanji.json
+npm run data:radicals   # extract the components of the final deck into src/data/radicals.json
+npm run data:vocabjson  # assemble src/data/vocab.json (JMdict entries, furigana, sentences)
 npm run data:verify     # sanity checks (must pass 100%)
 npm run data:pipeline   # run the whole chain
 ```
@@ -113,4 +126,5 @@ Framework preset: **Vite** · Build command: `npm run build` · Output directory
 
 Data sources and their licenses are documented in `ATTRIBUTIONS.md`. The application shows a
 condensed version of these credits ("Data sources & attribution" on the dashboard); the full
-licenses cover Tatoeba (CC BY 2.0), KANJIDIC/EDRDG (EDRDG licence), kanjiapi.dev, jpdb and Kuromoji.
+licenses cover Tatoeba (CC BY 2.0), KANJIDIC and JMdict via jmdict-simplified (EDRDG licence),
+kanjiapi.dev, jpdb and Kuromoji.
