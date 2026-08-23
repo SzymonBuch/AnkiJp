@@ -157,8 +157,9 @@ export function QuizSetup({
 
       {!canStart && (
         <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-center text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-          No kanji matches these sources and filters. Enable more sources, relax the filters, or
-          add new kanji with “+ New kanji”.
+          {type === 'radical'
+            ? 'No radicals match these sources. Enable more sources — quizable radicals appear as you study them.'
+            : 'No kanji matches these sources and filters. Enable more sources, relax the filters, or add new kanji with “+ New kanji”.'}
         </p>
       )}
 

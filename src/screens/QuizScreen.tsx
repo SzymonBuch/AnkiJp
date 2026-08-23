@@ -92,8 +92,8 @@ function EmptyState({ onExit }: { onExit: () => void }) {
     <div className="flex flex-col items-center gap-6 py-16 text-center">
       <h2 className="text-2xl font-semibold">Nothing to quiz yet</h2>
       <p className="max-w-sm text-slate-600 dark:text-slate-300">
-        Your deck is empty of quizable kanji. Study a few first — quizzes can draw from kanji
-        you know, ones in progress, or even brand-new cards.
+        Your deck is empty of quizable cards. Study a few first — quizzes can draw from cards you
+        know, ones in progress, or even brand-new ones.
       </p>
       <button
         type="button"

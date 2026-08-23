@@ -145,9 +145,11 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
     mutate: (id: string) => Promise<SrsCard | undefined>,
   ) => {
     await mutate(id)
-    const updated = (await getCard(id)) ?? null
-    setSelected(updated)
-    setCards((prev) => prev.map((c) => (c.id === id ? (updated ?? c) : c)))
+    const [updated, allCards] = await Promise.all([getCard(id), getAllCards()])
+    setSelected(updated ?? null)
+    // Known toggles cascade (auto-known #9, gating), so refresh every row and
+    // the blocked counter, not just the card the user touched.
+    setCards(allCards)
   }
 
   const toggleKnown = (id: string, known: boolean) =>
