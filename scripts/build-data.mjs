@@ -5,36 +5,12 @@ import {
   JPDB_SCRAPE_PATH,
   AI_PATH,
   TATOEBA_SENTENCES_PATH,
+  EXTENSIONS_PATH,
   KANJI_DATA_PATH,
   readJsonFile,
   writeJsonFile,
 } from "./lib/common.mjs";
-
-const MIN_SENTENCES = 2;
-const MAX_SENTENCES = 3;
-
-function mergeSentences(jpdbSentences, tatoeba, vocab) {
-  const merged = [];
-  for (const s of jpdbSentences) {
-    if (merged.length < MAX_SENTENCES) merged.push(s);
-  }
-  for (const s of tatoeba) {
-    if (merged.length >= MIN_SENTENCES) break;
-    merged.push(s);
-  }
-  for (const v of vocab) {
-    if (merged.length >= MIN_SENTENCES) break;
-    merged.push(v);
-  }
-  return merged;
-}
-
-function pickMnemonic(kanji, jpdbMnemonic, ai) {
-  const aiMnemonic = ai?.[kanji]?.mnemonic?.trim();
-  if (jpdbMnemonic.trim()) return { mnemonic: jpdbMnemonic.trim(), source: "jpdb" };
-  if (aiMnemonic) return { mnemonic: aiMnemonic, source: "ai" };
-  return { mnemonic: "", source: "ai" };
-}
+import { mergeSentences, pickMnemonic } from "./lib/record.mjs";
 
 async function main() {
   const kyoiku = readJsonFile(KYOIKU_PATH, []);
@@ -44,6 +20,7 @@ async function main() {
   const scraped = readJsonFile(JPDB_SCRAPE_PATH, {});
   const ai = readJsonFile(AI_PATH, {});
   const tatoeba = readJsonFile(TATOEBA_SENTENCES_PATH, {});
+  const extensions = readJsonFile(EXTENSIONS_PATH, null);
 
   const data = kyoiku.map((k) => {
     const jp = scraped[k.kanji] ?? {};
@@ -63,11 +40,21 @@ async function main() {
     };
   });
 
+  // Grade-0 extension records are built by extend-deck.mjs and appended after
+  // the kyōiku block in usefulness order (decisions #8, #15, #18). The file
+  // already stores them sorted; keep that order verbatim.
+  if (extensions?.records?.length) {
+    data.push(...extensions.records);
+    console.log(`Appended ${extensions.records.length} grade-0 extension kanji.`);
+  }
+
   fs.mkdirSync(path.dirname(KANJI_DATA_PATH), { recursive: true });
   writeJsonFile(KANJI_DATA_PATH, data, true);
 
   const stats = {
     total: data.length,
+    kyōiku: kyoiku.length,
+    grade0: data.length - kyoiku.length,
     jpdbMnemonics: data.filter((d) => d.mnemonicSource === "jpdb").length,
     aiMnemonics: data.filter((d) => d.mnemonicSource === "ai").length,
     missingMnemonics: data.filter((d) => d.mnemonicSource === "ai" && !d.mnemonic).length,
