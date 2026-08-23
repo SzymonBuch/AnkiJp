@@ -1,4 +1,5 @@
 import type { QuestionMode, QuizQuestion } from '../lib/quiz'
+import { TypeBadge } from './TypeBadge'
 
 interface QuizQuestionViewProps {
   question: QuizQuestion
@@ -35,9 +36,13 @@ export function QuizQuestionView({
           Question <span className="font-semibold text-slate-900 dark:text-slate-100">{index + 1}</span> of {total}
         </span>
         <span className="flex items-center gap-2">
-          <span className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs font-semibold text-slate-500 dark:border-slate-600 dark:text-slate-400">
-            G{question.grade}
-          </span>
+          {/* Identical fronts (`r:一` vs `k:一`) are disambiguated by type. */}
+          <TypeBadge type={question.kind === 'radical' ? 'radical' : 'kanji'} />
+          {question.kind === 'kanji' && (
+            <span className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs font-semibold text-slate-500 dark:border-slate-600 dark:text-slate-400">
+              G{question.grade}
+            </span>
+          )}
           <span className="text-slate-400 dark:text-slate-500">{INSTRUCTION[question.mode]}</span>
         </span>
       </div>
@@ -74,7 +79,7 @@ export function QuizQuestionView({
               type="button"
               disabled={answered}
               onClick={() => onSelect(option)}
-              className={`rounded-xl border-2 px-4 py-4 text-center text-lg font-semibold shadow-sm transition disabled:cursor-default ${classes}`}
+              className={`flex min-h-14 items-center justify-center rounded-xl border-2 px-4 py-3 text-center text-lg font-semibold shadow-sm transition [overflow-wrap:anywhere] disabled:cursor-default ${classes}`}
             >
               {option}
             </button>
@@ -93,7 +98,7 @@ export function QuizQuestionView({
               ? 'Correct!'
               : `Not quite — the answer is ${question.correct}`}
           </p>
-          {isCloze && question.sentenceEn && (
+          {question.kind === 'kanji' && isCloze && question.sentenceEn && (
             <p className="max-w-sm text-center text-sm text-slate-500 dark:text-slate-400">
               {question.sentenceEn}
             </p>

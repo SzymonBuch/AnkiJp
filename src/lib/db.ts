@@ -3,6 +3,7 @@ import {
   createCard,
   cardId,
   typeOf,
+  bareId,
   DAY_MS,
   rateCard,
   type CardState,
@@ -11,8 +12,10 @@ import {
   type Rating,
   type SrsCard,
 } from './srs'
-import { KANJI_DATA } from './kanji'
+import { KANJI_DATA, getKanji } from './kanji'
+import { RADICALS_DATA } from './radicals'
 import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
+import { buildGateContext, isComponentSeen, isKanjiUnlocked } from './gating'
 
 export const DB_NAME = 'ankijp'
 export const DB_VERSION = 3
@@ -20,7 +23,11 @@ const SETTINGS_KEY = 'settings'
 const SEED_STAMP_KEY = 'seed-stamp'
 
 export interface Settings {
+  /** Daily budget of new kanji cards. */
   newPerDay: number
+  /** Daily budgets of the lighter card types — deliberately higher than kanji's. */
+  newPerDayRadical: number
+  newPerDayVocab: number
   reviewLimit: number
   knownThresholdDays: number
   quiz: QuizConfig
@@ -37,9 +44,18 @@ export interface SeedStamp {
 
 export const DEFAULT_SETTINGS: Settings = {
   newPerDay: 20,
+  newPerDayRadical: 60,
+  newPerDayVocab: 40,
   reviewLimit: 200,
   knownThresholdDays: 21,
   quiz: DEFAULT_QUIZ_CONFIG,
+}
+
+/** Per-type daily budgets for new cards; the review limit stays global. */
+const NEW_PER_DAY: Record<ContentType, 'newPerDay' | 'newPerDayRadical' | 'newPerDayVocab'> = {
+  kanji: 'newPerDay',
+  radical: 'newPerDayRadical',
+  vocab: 'newPerDayVocab',
 }
 
 export interface ReviewLog {
@@ -200,16 +216,40 @@ async function stampSeeded(db: IDBPDatabase<AnkiJpDB>, type: ContentType): Promi
  */
 export async function ensureSeeded(): Promise<void> {
   const db = await getDb()
-  if ((await readSeedStamp(db)).has('kanji')) return
-  if ((await db.count('cards')) === 0) {
-    const now = Date.now()
-    const tx = db.transaction('cards', 'readwrite')
-    KANJI_DATA.forEach((entry, pos) => {
-      tx.store.put(createCard(cardId('kanji', entry.kanji), pos, now))
-    })
-    await tx.done
+  const seeded = await readSeedStamp(db)
+  if (!seeded.has('kanji')) {
+    if ((await db.count('cards')) === 0) {
+      const now = Date.now()
+      const tx = db.transaction('cards', 'readwrite')
+      KANJI_DATA.forEach((entry, pos) => {
+        tx.store.put(createCard(cardId('kanji', entry.kanji), pos, now))
+      })
+      await tx.done
+    }
+    await stampSeeded(db, 'kanji')
   }
-  await stampSeeded(db, 'kanji')
+  if (!seeded.has('radical')) {
+    await seedRadicals()
+    await stampSeeded(db, 'radical')
+  }
+}
+
+/**
+ * Materialize every radical card (decision #18: the components of the final
+ * deck), then apply migration rule B (decision #11): components of all seen
+ * kanji start as known through the shared `isComponentSeen` predicate. Runs
+ * once per database; fresh installs have no seen kanji, so nothing is skipped.
+ */
+async function seedRadicals(): Promise<void> {
+  const now = Date.now()
+  const ctx = buildGateContext(await getAllCards())
+  const { knownThresholdDays } = await getSettings()
+  const cards: SrsCard[] = RADICALS_DATA.map((entry, pos) => {
+    let card = createCard(cardId('radical', entry.glyph), pos, now)
+    if (isComponentSeen(entry.glyph, ctx)) card = applyKnown(card, knownThresholdDays, now)
+    return card
+  })
+  await bulkPutCards(cards)
 }
 
 export async function getCard(id: string): Promise<SrsCard | undefined> {
@@ -314,7 +354,10 @@ export interface SessionQueue {
 
 /**
  * Build the session queue for one content type. The daily new-card budget is
- * per type; the review limit stays global across types.
+ * per type (kanji `newPerDay`, radicals/vocab their own settings); the review
+ * limit stays global across types. New kanji are gated: a kanji only enters
+ * the fresh queue once all of its components have been seen (#3, via the same
+ * predicate as migration rule B).
  */
 export async function getSessionQueue(
   type: ContentType = 'kanji',
@@ -329,6 +372,7 @@ export async function getSessionQueue(
   ])
   const endOfToday = startOfDay(now) + DAY_MS
   const ofType = cards.filter((c) => typeOf(c.id) === type && !c.ignored)
+  const gateCtx = type === 'kanji' ? buildGateContext(cards) : null
 
   const learning = ofType
     .filter((c) => c.state === 'learning' || c.state === 'relearning')
@@ -340,10 +384,12 @@ export async function getSessionQueue(
     .sort((a, b) => a.due - b.due)
     .slice(0, Math.max(0, settings.reviewLimit - globalCounts.reviewsToday))
 
+  const freshLimitKey = NEW_PER_DAY[type]
   const fresh = ofType
     .filter((c) => c.state === 'new')
     .sort((a, b) => a.pos - b.pos)
-    .slice(0, Math.max(0, settings.newPerDay - counts.newToday))
+    .filter((c) => gateCtx === null || isKanjiUnlocked(getKanji(bareId(c.id)), gateCtx))
+    .slice(0, Math.max(0, settings[freshLimitKey] - counts.newToday))
 
   return { learning, review, fresh }
 }
@@ -351,6 +397,8 @@ export async function getSessionQueue(
 /**
  * Rate a card and persist the new state together with a log entry.
  * Answering a card that was never materialized is an error — no ghost cards.
+ * When a kanji crosses the known threshold, its identity radical `r:X` is
+ * auto-marked known (decision #9) so the same fact is never reviewed twice.
  */
 export async function answerCard(
   id: string,
@@ -372,6 +420,12 @@ export async function answerCard(
     due: updated.due,
     timestamp: now,
   })
+  if (typeOf(id) === 'kanji') {
+    const { knownThresholdDays } = await getSettings()
+    const crossed =
+      !isKnownState(card, knownThresholdDays) && isKnownState(updated, knownThresholdDays)
+    if (crossed) await propagateKnownToIdentityRadical(bareId(id), knownThresholdDays, now)
+  }
   return updated
 }
 
@@ -393,6 +447,8 @@ export async function resetProgress(): Promise<void> {
  * `true`: snapshot the current SRS state, then jump to review at/over the known
  * threshold. Re-marking an already-known card never overwrites the snapshot.
  * `false`: restore the snapshotted state (legacy cards without one just lose the flag).
+ * Marking a kanji known also marks its identity radical `r:X` (decision #9);
+ * un-marking never reverses that.
  */
 export async function markKnown(
   id: string,
@@ -401,14 +457,38 @@ export async function markKnown(
 ): Promise<SrsCard | undefined> {
   const card = await getCard(id)
   if (!card) return undefined
-  const updated = known ? await applyKnown(card, now) : undoKnown(card)
+  const { knownThresholdDays } = await getSettings()
+  const updated = known ? applyKnown(card, knownThresholdDays, now) : undoKnown(card)
   await putCard(updated)
+  if (known && typeOf(id) === 'kanji') {
+    await propagateKnownToIdentityRadical(bareId(id), knownThresholdDays, now)
+  }
   return updated
 }
 
-async function applyKnown(card: SrsCard, now: number): Promise<SrsCard> {
+/** A card counts as known when flagged or when its interval reached the threshold. */
+function isKnownState(card: SrsCard, thresholdDays: number): boolean {
+  return card.known || card.interval >= thresholdDays
+}
+
+/**
+ * Decision #9: when kanji `X` becomes known, `r:X` becomes known too — once,
+ * without a reverse transition on un-knowing. No-op when the radical card does
+ * not exist (kanji that are nobody's component) or is already known.
+ */
+async function propagateKnownToIdentityRadical(
+  glyph: string,
+  thresholdDays: number,
+  now: number,
+): Promise<void> {
+  const radicalId = cardId('radical', glyph)
+  const radical = await getCard(radicalId)
+  if (!radical || radical.known) return
+  await putCard(applyKnown(radical, thresholdDays, now))
+}
+
+function applyKnown(card: SrsCard, thresholdDays: number, now: number): SrsCard {
   if (card.known && card.knownPrev) return { ...card }
-  const { knownThresholdDays } = await getSettings()
   const snapshot: KnownSnapshot = {
     state: card.state,
     step: card.step,
@@ -418,7 +498,7 @@ async function applyKnown(card: SrsCard, now: number): Promise<SrsCard> {
     reps: card.reps,
     lapses: card.lapses,
   }
-  const interval = Math.max(card.interval, knownThresholdDays)
+  const interval = Math.max(card.interval, thresholdDays)
   return {
     ...card,
     known: true,
@@ -477,11 +557,14 @@ export interface KnownPool {
  * `true`: an ignored card leaves every queue, pool and summary; if it was
  * marked known, the flag is undone first (restoring the snapshotted state).
  * `false`: the card returns to its normal state-based behavior.
+ * Radicals cannot be ignored (decision #10): banning a component would lock
+ * its kanji forever — only "Mark as known" is offered for them.
  */
 export async function markIgnored(
   id: string,
   ignored: boolean,
 ): Promise<SrsCard | undefined> {
+  if (typeOf(id) === 'radical') throw new Error(`Radicals cannot be ignored: ${id}`)
   const card = await getCard(id)
   if (!card) return undefined
   const updated = ignored ? { ...undoKnown(card), ignored: true } : { ...card, ignored: false }
@@ -521,18 +604,18 @@ export interface QuizPools {
 }
 
 /**
- * Card pools for quiz setup. Read-only: never modifies cards or logs.
- * Only kanji cards are pooled — the quiz pipeline (grades, `getKanji`) is
- * kanji-specific; per-type quiz pools arrive with their own stages. Ignored
- * cards are excluded; each pool is sorted by seed position. Returns cards
- * (not ids) so filters can use `due`/`lapses`/`ease`.
+ * Card pools for quiz setup of one content type. Read-only: never modifies
+ * cards or logs. The kanji-specific parts of the quiz pipeline (grades,
+ * `getKanji`, cloze) live in the quiz layer. Ignored cards are excluded; each
+ * pool is sorted by study position. Returns cards (not ids) so filters can
+ * use `due`/`lapses`/`ease`.
  */
-export async function getQuizPools(): Promise<QuizPools> {
+export async function getQuizPools(type: ContentType = 'kanji'): Promise<QuizPools> {
   await ensureSeeded()
   const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
   const pools: QuizPools = { known: [], progress: [], new: [] }
   for (const card of cards) {
-    if (card.ignored || typeOf(card.id) !== 'kanji') continue
+    if (card.ignored || typeOf(card.id) !== type) continue
     if (card.known || card.interval >= settings.knownThresholdDays) pools.known.push(card)
     else if (card.state === 'new') pools.new.push(card)
     else pools.progress.push(card)

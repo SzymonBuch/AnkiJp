@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import { KANJI_DATA, type KanjiEntry } from './kanji'
+import { RADICALS_DATA, type RadicalEntry } from './radicals'
 import {
   buildQuiz,
+  buildRadicalQuiz,
   DEFAULT_QUIZ_CONFIG,
   isClozeEligible,
   primaryReading,
   sampleKanji,
   selectQuizTargets,
+  selectRadicalTargets,
+  type KanjiQuestion,
   type QuizConfig,
-  type QuizQuestion,
 } from './quiz'
-import { bareId, cardId, createCard, DAY_MS, STARTING_EASE, type SrsCard } from './srs'
+import { bareId, cardId, createCard, DAY_MS, STARTING_EASE, typeOf, type SrsCard } from './srs'
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0
@@ -24,7 +27,7 @@ function mulberry32(seed: number): () => number {
 
 const POOL = KANJI_DATA.slice(0, 6)
 
-function entryFor(question: QuizQuestion) {
+function entryFor(question: KanjiQuestion) {
   return KANJI_DATA.find((e) => e.kanji === question.kanji)!
 }
 
@@ -310,6 +313,107 @@ describe('buildQuiz mixed + cloze', () => {
     for (const mode of ['reading', 'mixed', 'cloze'] as const) {
       const quiz = buildQuiz(mode, POOL, KANJI_DATA, mulberry32(31))
       for (const q of quiz) expect(q.grade).toBe(entryFor(q).grade)
+    }
+  })
+})
+
+describe('buildRadicalQuiz (Etap 2: glyph → keyword, distractors from the full pool)', () => {
+  const POOL_R = RADICALS_DATA.slice(0, 6)
+
+  it('builds one meaning question per target with the glyph as prompt', () => {
+    const quiz = buildRadicalQuiz(POOL_R, RADICALS_DATA, mulberry32(7))
+    expect(quiz).toHaveLength(POOL_R.length)
+    for (let i = 0; i < quiz.length; i++) {
+      const q = quiz[i]
+      expect(q.kind).toBe('radical')
+      expect(q.mode).toBe('meaning')
+      expect(q.index).toBe(i)
+      expect(q.prompt).toBe(POOL_R[i].glyph)
+      expect(q.glyph).toBe(POOL_R[i].glyph)
+      expect(q.keyword).toBe(POOL_R[i].keyword)
+      expect(q.correct).toBe(POOL_R[i].keyword)
+    }
+  })
+
+  it('has exactly one correct option and no duplicate options', () => {
+    const quiz = buildRadicalQuiz(POOL_R, RADICALS_DATA, mulberry32(3))
+    for (const q of quiz) {
+      expect(q.options).toHaveLength(4)
+      expect(new Set(q.options).size).toBe(4)
+      expect(q.options.filter((option) => option === q.correct)).toHaveLength(1)
+    }
+  })
+
+  it('never offers the target keyword as a distractor and draws the rest from radicals', () => {
+    const [target] = RADICALS_DATA.slice(40, 41)
+    const [q] = buildRadicalQuiz([target], RADICALS_DATA, mulberry32(5))
+    const poolKeywords = new Set(RADICALS_DATA.map((r) => r.keyword))
+    for (const option of q.options) {
+      if (option === q.correct) continue
+      expect(poolKeywords.has(option)).toBe(true)
+      expect(option).not.toBe(target.keyword)
+    }
+  })
+
+  it('is deterministic for a given rng sequence', () => {
+    expect(buildRadicalQuiz(POOL_R, RADICALS_DATA, mulberry32(11))).toEqual(
+      buildRadicalQuiz(POOL_R, RADICALS_DATA, mulberry32(11)),
+    )
+  })
+})
+
+describe('selectRadicalTargets', () => {
+  const NOW = new Date('2026-08-20T12:00:00Z').getTime()
+
+  function radicalCard(glyph: string, over: Partial<SrsCard> = {}): SrsCard {
+    return { ...createCard(cardId('radical', glyph), RADICALS_DATA.findIndex((r) => r.glyph === glyph), NOW), ...over }
+  }
+
+  function makePools() {
+    const glyphs = RADICALS_DATA.map((r) => r.glyph)
+    return {
+      known: glyphs.slice(0, 5).map((g) => radicalCard(g, { state: 'review', interval: 30, due: NOW + 30 * DAY_MS })),
+      progress: glyphs.slice(5, 9).map((g) => radicalCard(g, { state: 'learning', step: 0, due: NOW + 60_000 })),
+      new: glyphs.slice(9, 14).map((g) => radicalCard(g)),
+    }
+  }
+
+  function targetsOf(pools: ReturnType<typeof makePools>, sources: QuizConfig['sources'], count: number): RadicalEntry[] {
+    return selectRadicalTargets(
+      { ...DEFAULT_QUIZ_CONFIG, sources, count },
+      pools,
+      NOW,
+      mulberry32(2),
+    )
+  }
+
+  it('merges the selected sources without duplicates', () => {
+    const targets = targetsOf(makePools(), ['known', 'progress'], 100)
+    expect(targets).toHaveLength(9)
+    expect(new Set(targets.map((t) => t.glyph)).size).toBe(9)
+  })
+
+  it('respects dueOnly and problematicOnly through the shared card filters', () => {
+    const pools = makePools()
+    const config: QuizConfig = { ...DEFAULT_QUIZ_CONFIG, sources: ['known'], count: 100, dueOnly: true }
+    expect(selectRadicalTargets(config, pools, NOW, mulberry32(1))).toHaveLength(0)
+
+    pools.known[0].lapses = 1
+    const problematic = selectRadicalTargets(
+      { ...config, dueOnly: false, problematicOnly: true },
+      pools,
+      NOW,
+      mulberry32(1),
+    )
+    expect(problematic.map((t) => t.glyph)).toEqual([bareId(pools.known[0].id)])
+  })
+
+  it('returns RadicalEntry objects whose ids are radical namespaced cards', () => {
+    const pools = makePools()
+    const targets = targetsOf(pools, ['new'], 3)
+    expect(targets).toHaveLength(3)
+    for (const target of targets) {
+      expect(typeOf(cardId('radical', target.glyph))).toBe('radical')
     }
   })
 })

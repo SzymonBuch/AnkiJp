@@ -1,4 +1,5 @@
 import { getKanji, type KanjiEntry } from './kanji'
+import { getRadical, type RadicalEntry } from './radicals'
 import { bareId, DAY_MS, STARTING_EASE, type SrsCard } from './srs'
 import type { QuizPools } from './db'
 
@@ -11,6 +12,7 @@ export type QuestionMode = Exclude<QuizMode, 'mixed'>
 
 export interface QuizConfig {
   sources: QuizSource[]
+  /** School grades 1–6; meaningful only for kanji quizzes. */
   grades: number[]
   count: number
   extraNew: number
@@ -27,26 +29,39 @@ export const DEFAULT_QUIZ_CONFIG: QuizConfig = {
   problematicOnly: false,
 }
 
-export interface QuizQuestion {
+interface QuestionBase {
   index: number
   mode: QuestionMode
-  /** The kanji the question is about. */
-  kanji: string
-  /** School grade of the kanji (G1–G6 badge). */
-  grade: number
-  /** Text shown as the prompt: a kanji (reading/meaning), a reading (reverse) or a sentence with ◯ (cloze). */
+  /** Text shown as the prompt. */
   prompt: string
-  /** The primary reading the question is built around. */
-  reading: string
   /** The correct answer text. */
   correct: string
   /** 4 shuffled options; exactly one equals `correct`. */
   options: string[]
+}
+
+export interface KanjiQuestion extends QuestionBase {
+  kind: 'kanji'
+  /** The kanji the question is about. */
+  kanji: string
+  /** School grade of the kanji (G1–G6 badge). */
+  grade: number
+  /** The primary reading the question is built around. */
+  reading: string
   /** Cloze only: the example sentence with the kanji hidden… */
   sentenceJp?: string
   /** …and its English translation, revealed after answering. */
   sentenceEn?: string
 }
+
+export interface RadicalQuestion extends QuestionBase {
+  kind: 'radical'
+  /** Prompt is the bare glyph; identical to some kanji fronts — TypeBadge disambiguates. */
+  glyph: string
+  keyword: string
+}
+
+export type QuizQuestion = KanjiQuestion | RadicalQuestion
 
 export interface SelectQuizOpts {
   now?: number
@@ -125,22 +140,75 @@ export function sampleKanji<T>(arr: T[], count: number, rng: () => number): T[] 
 }
 
 /**
- * Build a complete, isolated quiz from the given targets. Pure function — never
- * touches the DB, the SRS state or logs. Question targets are only the given
- * entries; distractors may come from any kanji (they are simply wrong answers).
- * `mixed` picks a concrete mode per question, uniformly among the modes
- * available for that entry (cloze included when the entry has sentences).
+ * Build a complete, isolated kanji quiz from the given targets. Pure function —
+ * never touches the DB, the SRS state or logs. Question targets are only the
+ * given entries; distractors may come from any kanji (they are simply wrong
+ * answers). `mixed` picks a concrete mode per question, uniformly among the
+ * modes available for that entry (cloze included when the entry has sentences).
  */
 export function buildQuiz(
   mode: QuizMode,
   poolEntries: KanjiEntry[],
   allEntries: KanjiEntry[],
   rng: () => number = Math.random,
-): QuizQuestion[] {
+): KanjiQuestion[] {
   return poolEntries.map((entry, index) => {
     const questionMode = mode === 'mixed' ? pickMode(entry, rng) : mode
     return buildQuestion(questionMode, entry, index, allEntries, rng)
   })
+}
+
+/**
+ * Radical quiz (Etap 2): meaning mode — glyph → keyword — with distractors
+ * drawn from the full radical pool. Reverse stays unbuilt until the keywords
+ * prove unique enough on real cards (0 duplicates today, but long strings).
+ */
+export function buildRadicalQuiz(
+  targets: RadicalEntry[],
+  all: RadicalEntry[],
+  rng: () => number = Math.random,
+): RadicalQuestion[] {
+  return targets.map((entry, index) => ({
+    kind: 'radical',
+    index,
+    mode: 'meaning' as const,
+    prompt: entry.glyph,
+    glyph: entry.glyph,
+    keyword: entry.keyword,
+    correct: entry.keyword,
+    options: buildOptions(entry.keyword, candidateKeywords(entry, all), 3, rng),
+  }))
+}
+
+function candidateKeywords(target: RadicalEntry, all: RadicalEntry[]): string[] {
+  const seen = new Set([target.keyword])
+  const out: string[] = []
+  for (const { keyword } of all) {
+    if (!seen.has(keyword)) {
+      seen.add(keyword)
+      out.push(keyword)
+    }
+  }
+  return out
+}
+
+/** Sample radical quiz targets from snapshotted pools; same source semantics as kanji. */
+export function selectRadicalTargets(
+  config: Pick<QuizConfig, 'sources' | 'count' | 'dueOnly' | 'problematicOnly'>,
+  pools: QuizPools,
+  now: number,
+  rng: () => number = Math.random,
+): RadicalEntry[] {
+  const seen = new Set<string>()
+  const candidates: RadicalEntry[] = []
+  for (const card of config.sources.flatMap((source) => pools[source] ?? [])) {
+    if (!passesFilters(card, config, now)) continue
+    const glyph = bareId(card.id)
+    if (seen.has(glyph)) continue
+    seen.add(glyph)
+    candidates.push(getRadical(glyph))
+  }
+  return sampleKanji(candidates, config.count, rng)
 }
 
 function availableModes(entry: KanjiEntry): QuestionMode[] {
@@ -160,9 +228,10 @@ function buildQuestion(
   index: number,
   all: KanjiEntry[],
   rng: () => number,
-): QuizQuestion {
+): KanjiQuestion {
   const reading = primaryReading(entry)
-  const question: QuizQuestion = {
+  const question: KanjiQuestion = {
+    kind: 'kanji',
     index,
     mode,
     kanji: entry.kanji,

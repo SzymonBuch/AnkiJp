@@ -1,3 +1,4 @@
+import type { ContentType } from '../lib/srs'
 import type { QuizConfig, QuizMode, QuizSource } from '../lib/quiz'
 import type { QuizSourceCounts } from '../lib/useQuizSession'
 
@@ -17,7 +18,13 @@ const MODES: { mode: QuizMode; title: string; description: string; glyph: string
   { mode: 'cloze', title: 'Cloze', description: 'Fill the kanji in a sentence', glyph: '例' },
 ]
 
+/** Radical quizzes are meaning-only for now (Etap 2). */
+const RADICAL_MODES: { mode: QuizMode; title: string; description: string; glyph: string }[] = [
+  { mode: 'meaning', title: 'Meaning', description: 'Pick the keyword of a radical', glyph: '意' },
+]
+
 interface QuizSetupProps {
+  type: ContentType
   config: QuizConfig
   counts: QuizSourceCounts
   maxCount: number
@@ -29,6 +36,7 @@ interface QuizSetupProps {
 }
 
 export function QuizSetup({
+  type,
   config,
   counts,
   maxCount,
@@ -41,6 +49,7 @@ export function QuizSetup({
   const count = Math.min(config.count, Math.max(maxCount, 1))
   const extraNew = Math.min(config.extraNew, maxExtraNew)
   const setSize = Math.min(config.count, maxCount) + extraNew
+  const modes = type === 'radical' ? RADICAL_MODES : MODES
 
   const toggleSource = (source: QuizSource) => {
     const has = config.sources.includes(source)
@@ -87,34 +96,38 @@ export function QuizSetup({
           </div>
         </div>
 
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Grade
-          </h3>
-          <div className="flex flex-wrap gap-2">
-            {GRADES.map((grade) => (
-              <Chip
-                key={grade}
-                label={`G${grade}`}
-                pressed={config.grades.includes(grade)}
-                onClick={() => toggleGrade(grade)}
-              />
-            ))}
+        {type === 'kanji' && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Grade
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {GRADES.map((grade) => (
+                <Chip
+                  key={grade}
+                  label={`G${grade}`}
+                  pressed={config.grades.includes(grade)}
+                  onClick={() => toggleGrade(grade)}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="flex gap-2">
-          <Toggle
-            label="Due today only"
-            pressed={config.dueOnly}
-            onClick={() => onChange({ dueOnly: !config.dueOnly })}
-          />
-          <Toggle
-            label="Problematic"
-            pressed={config.problematicOnly}
-            onClick={() => onChange({ problematicOnly: !config.problematicOnly })}
-          />
-        </div>
+        {type === 'kanji' && (
+          <div className="flex gap-2">
+            <Toggle
+              label="Due today only"
+              pressed={config.dueOnly}
+              onClick={() => onChange({ dueOnly: !config.dueOnly })}
+            />
+            <Toggle
+              label="Problematic"
+              pressed={config.problematicOnly}
+              onClick={() => onChange({ problematicOnly: !config.problematicOnly })}
+            />
+          </div>
+        )}
 
         <Stepper
           label="Questions"
@@ -124,14 +137,16 @@ export function QuizSetup({
           max={Math.max(maxCount, 1)}
           onChange={(value) => onChange({ count: value })}
         />
-        <Stepper
-          label="+ New kanji"
-          hint={`${maxExtraNew} available`}
-          value={extraNew}
-          min={0}
-          max={maxExtraNew}
-          onChange={(value) => onChange({ extraNew: value })}
-        />
+        {type === 'kanji' && (
+          <Stepper
+            label="+ New kanji"
+            hint={`${maxExtraNew} available`}
+            value={extraNew}
+            min={0}
+            max={maxExtraNew}
+            onChange={(value) => onChange({ extraNew: value })}
+          />
+        )}
 
         <p className="text-center text-sm text-slate-600 dark:text-slate-300">
           Set:{' '}
@@ -148,7 +163,7 @@ export function QuizSetup({
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {MODES.map(({ mode, title, description, glyph }) => {
+        {modes.map(({ mode, title, description, glyph }) => {
           const disabled = !canStart || (mode === 'cloze' && clozeEligibleCount === 0)
           return (
             <button

@@ -2,6 +2,7 @@ import type { KanjiEntry } from '../lib/kanji'
 import type { Rating, SrsCard } from '../lib/srs'
 import { Furigana } from './Furigana'
 import { RatingButtons } from './RatingButtons'
+import { TypeBadge } from './TypeBadge'
 
 interface StudyCardProps {
   entry: KanjiEntry
@@ -10,15 +11,19 @@ interface StudyCardProps {
   drawing?: string | null
   onReveal: () => void
   onRate: (rating: Rating) => void
-  onIgnore: () => void
+  /** Radicals have no Ignore (decision #10); kanji sessions always do. */
+  onIgnore?: () => void
 }
 
 export function StudyCard({ entry, card, revealed, drawing, onReveal, onRate, onIgnore }: StudyCardProps) {
   if (!revealed) {
     return (
       <div className="flex flex-col items-center gap-10 py-12">
-        <div className="select-none text-[9rem] font-semibold leading-none sm:text-[11rem]">
-          {entry.kanji}
+        <div className="flex flex-col items-center gap-3">
+          <TypeBadge type="kanji" />
+          <div className="select-none text-[9rem] font-semibold leading-none sm:text-[11rem]">
+            {entry.kanji}
+          </div>
         </div>
         <div className="flex flex-col items-center gap-3">
           <button
@@ -29,7 +34,7 @@ export function StudyCard({ entry, card, revealed, drawing, onReveal, onRate, on
             Show answer
             <span className="ml-2 text-xs font-normal opacity-60">space / enter</span>
           </button>
-          <IgnoreButton onIgnore={onIgnore} />
+          {onIgnore && <IgnoreButton onIgnore={onIgnore} />}
         </div>
       </div>
     )
@@ -38,7 +43,10 @@ export function StudyCard({ entry, card, revealed, drawing, onReveal, onRate, on
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-start justify-between gap-4">
-        <div className="select-none text-7xl font-semibold leading-none">{entry.kanji}</div>
+        <div className="flex flex-col items-center gap-2">
+          <TypeBadge type="kanji" />
+          <div className="select-none text-7xl font-semibold leading-none">{entry.kanji}</div>
+        </div>
         <div className="text-right">
           <div className="text-xl font-semibold text-slate-900 dark:text-slate-100">{entry.meaning}</div>
           <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
@@ -135,9 +143,11 @@ export function StudyCard({ entry, card, revealed, drawing, onReveal, onRate, on
 
       <RatingButtons card={card} onRate={onRate} />
 
-      <div className="mt-2 flex justify-center">
-        <IgnoreButton onIgnore={onIgnore} />
-      </div>
+      {onIgnore && (
+        <div className="mt-2 flex justify-center">
+          <IgnoreButton onIgnore={onIgnore} />
+        </div>
+      )}
     </div>
   )
 }

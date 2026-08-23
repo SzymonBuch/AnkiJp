@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react'
 import { getLogs, getSummary, type Summary } from '../lib/db'
 import type { Screen } from '../lib/nav'
+import type { ContentType } from '../lib/srs'
 import { computeStats } from '../lib/stats'
 
 interface DashboardScreenProps {
-  onNavigate: (screen: Screen) => void
+  onNavigate: (screen: Screen, type?: ContentType) => void
 }
 
-const NAV: { screen: Screen; label: string; description: string }[] = [
-  { screen: 'study', label: 'Study new cards', description: 'Introduce new kanji' },
-  { screen: 'review', label: 'Review due cards', description: 'Due for review today' },
-  { screen: 'quiz', label: 'Quiz known kanji', description: 'Isolated practice with known kanji' },
-  { screen: 'deck', label: 'Deck', description: 'Browse all 1,006 kanji' },
-  { screen: 'stats', label: 'Statistics', description: 'Progress, accuracy, streaks' },
-  { screen: 'settings', label: 'Settings', description: 'Daily limits, export, reset' },
+/** Content types with study/review/quiz sessions; vocab joins in its own stage. */
+const SESSION_TYPES: { type: ContentType; label: string }[] = [
+  { type: 'kanji', label: 'Kanji' },
+  { type: 'radical', label: 'Radicals' },
 ]
 
 export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
@@ -41,7 +39,7 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       <div className="text-center">
         <h1 className="text-3xl font-semibold">AnkiJp</h1>
         <p className="mt-2 text-slate-600 dark:text-slate-300">
-          Learn all 1,006 joyo kanji with Anki-style SRS and quizzes.
+          Learn kanji through their radicals with Anki-style SRS and quizzes.
         </p>
       </div>
 
@@ -67,21 +65,97 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       )}
 
       <div className="flex w-full max-w-sm flex-col gap-3">
-        {NAV.map(({ screen, label, description }) => (
-          <button
-            key={screen}
-            type="button"
-            onClick={() => onNavigate(screen)}
-            className="flex items-center justify-between rounded-xl border border-slate-300 bg-white px-5 py-3 text-left shadow-sm transition active:scale-95 dark:border-slate-600 dark:bg-slate-900"
-          >
-            <span className="font-semibold text-slate-700 dark:text-slate-300">{label}</span>
-            <span className="text-sm text-slate-400 dark:text-slate-500">{description}</span>
-          </button>
-        ))}
+        <SessionNav
+          screen="study"
+          label="Study new cards"
+          description="Introduce new cards"
+          onNavigate={onNavigate}
+        />
+        <SessionNav
+          screen="review"
+          label="Review due cards"
+          description="Due for review today"
+          onNavigate={onNavigate}
+        />
+        <SessionNav
+          screen="quiz"
+          label="Quiz"
+          description="Isolated practice"
+          onNavigate={onNavigate}
+        />
+        <NavButton
+          label="Deck"
+          description="Browse radicals and kanji"
+          onClick={() => onNavigate('deck')}
+        />
+        <NavButton
+          label="Statistics"
+          description="Progress, accuracy, streaks"
+          onClick={() => onNavigate('stats')}
+        />
+        <NavButton
+          label="Settings"
+          description="Daily limits, export, reset"
+          onClick={() => onNavigate('settings')}
+        />
       </div>
 
       <Attribution />
     </div>
+  )
+}
+
+function SessionNav({
+  screen,
+  label,
+  description,
+  onNavigate,
+}: {
+  screen: Screen
+  label: string
+  description: string
+  onNavigate: (screen: Screen, type?: ContentType) => void
+}) {
+  return (
+    <div className="rounded-xl border border-slate-300 bg-white px-5 py-3 shadow-sm dark:border-slate-600 dark:bg-slate-900">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-semibold text-slate-700 dark:text-slate-300">{label}</span>
+        <span className="flex gap-2">
+          {SESSION_TYPES.map(({ type, label: typeLabel }) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => onNavigate(screen, type)}
+              className="min-h-9 rounded-full border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-600 transition active:scale-95 hover:border-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-400"
+            >
+              {typeLabel}
+            </button>
+          ))}
+        </span>
+      </div>
+      <p className="mt-0.5 text-sm text-slate-400 dark:text-slate-500">{description}</p>
+    </div>
+  )
+}
+
+function NavButton({
+  label,
+  description,
+  onClick,
+}: {
+  label: string
+  description: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center justify-between rounded-xl border border-slate-300 bg-white px-5 py-3 text-left shadow-sm transition active:scale-95 dark:border-slate-600 dark:bg-slate-900"
+    >
+      <span className="font-semibold text-slate-700 dark:text-slate-300">{label}</span>
+      <span className="text-sm text-slate-400 dark:text-slate-500">{description}</span>
+    </button>
   )
 }
 

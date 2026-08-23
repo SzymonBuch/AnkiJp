@@ -31,6 +31,7 @@ import {
   setSettings,
 } from './db'
 import { KANJI_DATA } from './kanji'
+import { RADICALS_DATA } from './radicals'
 import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
 import {
   DAY_MS,
@@ -38,7 +39,6 @@ import {
   STARTING_EASE,
   bareId,
   cardId,
-  createCard,
   rateCard,
   typeOf,
 } from './srs'
@@ -52,14 +52,28 @@ beforeEach(async () => {
 })
 
 describe('seeding', () => {
-  it('seeds one card per kanji and is idempotent', async () => {
+  it('seeds one card per kanji and per radical and is idempotent', async () => {
     const cards = await getAllCards()
-    expect(cards).toHaveLength(KANJI_DATA.length)
+    expect(cards.filter((c) => typeOf(c.id) === 'kanji')).toHaveLength(KANJI_DATA.length)
+    expect(cards.filter((c) => typeOf(c.id) === 'radical')).toHaveLength(RADICALS_DATA.length)
     expect(cards[0].id).toBe('k:一')
     expect(cards[0].state).toBe('new')
 
     await ensureSeeded()
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length)
+    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
+  })
+
+  it('seeds radicals in usage-ranking order with fresh states', async () => {
+    const radicalCards = (await getAllCards())
+      .filter((c) => typeOf(c.id) === 'radical')
+      .sort((a, b) => a.pos - b.pos)
+    expect(radicalCards).toHaveLength(RADICALS_DATA.length)
+    // pos mirrors the bundled usage ranking (decision #15).
+    expect(radicalCards.map((c) => c.id)).toEqual(RADICALS_DATA.map((r) => `r:${r.glyph}`))
+    for (const card of radicalCards) {
+      expect(card.state).toBe('new')
+      expect(card.known).toBe(false)
+    }
   })
 })
 
@@ -98,7 +112,7 @@ describe('answerCard', () => {
 
   it('rejects answers for never-materialized cards instead of creating ghosts', async () => {
     await expect(answerCard('w:食べる', 'good', NOW)).rejects.toThrow(/unknown card/i)
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length)
+    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
     expect(await getLogs()).toHaveLength(0)
   })
 })
@@ -175,23 +189,29 @@ describe('session queue', () => {
 })
 
 describe('content types', () => {
-  /** Synthetic radical cards — no radical deck exists until its own stage seeds one. */
-  beforeEach(async () => {
-    await putCard(createCard('r:氵', 0, NOW))
-    await putCard(createCard('r:木', 1, NOW))
-  })
+  /** A kanji with distinct components, so gating scenarios are controllable. */
+  const GATED = KANJI_DATA.find((e) =>
+    e.radicals.some((r) => r.glyph !== e.kanji && RADICALS_DATA.some((x) => x.glyph === r.glyph)),
+  )!
+  const GATED_COMPONENTS = GATED.radicals
+    .filter((r) => r.glyph !== GATED.kanji)
+    .map((r) => r.glyph)
+    .filter((glyph) => RADICALS_DATA.some((x) => x.glyph === glyph))
 
   it('keeps session queues separate per type with independent new-card budgets', async () => {
-    await setSettings({ newPerDay: 1 })
+    await setSettings({ newPerDay: 5, newPerDayRadical: 3 })
 
     const kanjiQ = await getSessionQueue('kanji', NOW)
-    expect(kanjiQ.fresh).toHaveLength(1)
+    expect(kanjiQ.fresh).toHaveLength(5)
     for (const card of [...kanjiQ.fresh, ...kanjiQ.learning, ...kanjiQ.review]) {
       expect(card.id.startsWith('k:')).toBe(true)
     }
 
+    // Radicals follow their usage ranking: most-used components first.
     const radicalQ = await getSessionQueue('radical', NOW)
-    expect(radicalQ.fresh.map((c) => c.id)).toEqual(['r:氵'])
+    expect(radicalQ.fresh.map((c) => c.id)).toEqual(
+      RADICALS_DATA.slice(0, 3).map((r) => `r:${r.glyph}`),
+    )
     for (const card of [...radicalQ.fresh, ...radicalQ.learning, ...radicalQ.review]) {
       expect(card.id.startsWith('r:')).toBe(true)
     }
@@ -199,11 +219,13 @@ describe('content types', () => {
 
   it('routes answers into per-type queues, summaries and daily counts', async () => {
     await answerCard('k:一', 'good', NOW)
-    await answerCard('r:氵', 'good', NOW)
+    await answerCard(`r:${RADICALS_DATA[0].glyph}`, 'good', NOW)
     const later = NOW + MIN_MS
 
     expect((await getSessionQueue('kanji', later)).learning.map((c) => c.id)).toEqual(['k:一'])
-    expect((await getSessionQueue('radical', later)).learning.map((c) => c.id)).toEqual(['r:氵'])
+    expect((await getSessionQueue('radical', later)).learning.map((c) => c.id)).toEqual([
+      `r:${RADICALS_DATA[0].glyph}`,
+    ])
 
     expect(await getDailyCounts(later, 'kanji')).toEqual({ newToday: 1, reviewsToday: 0 })
     expect(await getDailyCounts(later, 'radical')).toEqual({ newToday: 1, reviewsToday: 0 })
@@ -211,22 +233,127 @@ describe('content types', () => {
 
     const kanjiSummary = await getSummary('kanji', later)
     expect(kanjiSummary.learning).toBe(1)
-    expect(kanjiSummary.fresh).toBe(KANJI_DATA.length - 1)
     const radicalSummary = await getSummary('radical', later)
-    expect(radicalSummary).toMatchObject({ learning: 1, fresh: 1 })
+    expect(radicalSummary.learning).toBe(1)
+    expect(radicalSummary.fresh).toBe(RADICALS_DATA.length - 1)
   })
 
-  it('separates the known pool and keeps non-kanji cards out of quiz pools', async () => {
-    await markKnown('r:氵', true)
-    expect(await getKnownPool('radical')).toMatchObject({ ids: ['r:氵'] })
+  it('separates the known pool and keeps non-kanji cards out of kanji quiz pools', async () => {
+    const topGlyph = RADICALS_DATA[0].glyph
+    await markKnown(`r:${topGlyph}`, true)
+    expect(await getKnownPool('radical')).toMatchObject({ ids: [`r:${topGlyph}`] })
     expect(await getKnownPool('kanji')).toMatchObject({ ids: [] })
 
-    await answerCard('r:木', 'good', NOW)
+    const secondGlyph = RADICALS_DATA[1].glyph
+    await answerCard(`r:${secondGlyph}`, 'good', NOW)
     const pools = await getQuizPools()
     for (const pool of [pools.known, pools.progress, pools.new]) {
       for (const card of pool) expect(typeOf(card.id)).toBe('kanji')
     }
     expect(pools.new.length).toBeGreaterThan(0)
+
+    // Radical pools exist symmetrically for the radical quiz.
+    const radicalPools = await getQuizPools('radical')
+    expect(radicalPools.new.map((c) => c.id)).not.toContain(`r:${topGlyph}`)
+    expect(radicalPools.known.map((c) => c.id)).toContain(`r:${topGlyph}`)
+  })
+
+  describe('gating (decision #3)', () => {
+    it('withholds gated kanji from the fresh queue until every component is seen', async () => {
+      await setSettings({ newPerDayRadical: 60 })
+
+      // Nothing studied yet: the gated kanji must not be introducible…
+      let q = await getSessionQueue('kanji', NOW)
+      expect(q.fresh.map((c) => c.id)).not.toContain(cardId('kanji', GATED.kanji))
+      // …while the components themselves are queued by usage rank.
+      const radicalFresh = (await getSessionQueue('radical', NOW)).fresh.map((c) => bareId(c.id))
+      expect(GATED_COMPONENTS.some((glyph) => radicalFresh.includes(glyph))).toBe(true)
+
+      // Study one component: still gated by the rest.
+      await answerCard(cardId('radical', GATED_COMPONENTS[0]), 'good', NOW)
+      q = await getSessionQueue('kanji', NOW)
+      if (GATED_COMPONENTS.length > 1) {
+        expect(q.fresh.map((c) => c.id)).not.toContain(cardId('kanji', GATED.kanji))
+      }
+
+      // Study the remaining components: the kanji unlocks mid-session.
+      for (const glyph of GATED_COMPONENTS.slice(1)) {
+        await answerCard(cardId('radical', glyph), 'good', NOW)
+      }
+      q = await getSessionQueue('kanji', NOW + MIN_MS)
+      expect(q.fresh.map((c) => c.id)).toContain(cardId('kanji', GATED.kanji))
+    })
+
+    it('does not touch learning/review queues — gating only delays introduction', async () => {
+      const card = (await getCard(cardId('kanji', GATED.kanji)))!
+      card.state = 'review'
+      card.interval = 5
+      card.due = NOW - 60_000
+      await putCard(card)
+      const q = await getSessionQueue('kanji', NOW)
+      expect(q.review.map((c) => c.id)).toContain(cardId('kanji', GATED.kanji))
+    })
+  })
+
+  describe('per-type daily limits (Etap 2 settings)', () => {
+    it('uses the radical limit for radical queues without touching the kanji limit', async () => {
+      await setSettings({ newPerDayRadical: 2 })
+      const q = await getSessionQueue('radical', NOW)
+      expect(q.fresh).toHaveLength(2)
+    })
+
+    it('recounts the radical budget from today’s log', async () => {
+      await setSettings({ newPerDayRadical: 1 })
+      await answerCard(`r:${RADICALS_DATA[0].glyph}`, 'good', NOW)
+      expect((await getSessionQueue('radical', NOW)).fresh).toHaveLength(0)
+    })
+  })
+
+  describe('auto-known propagation (decision #9)', () => {
+    /** A kanji whose glyph doubles as a component, so `r:X` exists. */
+    const HOST = KANJI_DATA.find((e) => RADICALS_DATA.some((r) => r.glyph === e.kanji))!
+
+    it('marks the identity radical known when a kanji crosses the threshold via an answer', async () => {
+      // Interval 20 with ease 130 grows past the 21-day threshold on Good.
+      const card = (await getCard(cardId('kanji', HOST.kanji)))!
+      card.state = 'review'
+      card.interval = 20
+      card.ease = 130
+      card.due = NOW - 60_000
+      await putCard(card)
+
+      expect((await getCard(`r:${HOST.kanji}`))!.known).toBe(false)
+      await answerCard(cardId('kanji', HOST.kanji), 'good', NOW)
+      const radical = (await getCard(`r:${HOST.kanji}`))!
+      expect(radical.known).toBe(true)
+      expect(radical.state).toBe('review')
+      expect(radical.interval).toBe(DEFAULT_SETTINGS.knownThresholdDays)
+    })
+
+    it('marks the identity radical known on manual markKnown, without undoing it later', async () => {
+      await markKnown(cardId('kanji', HOST.kanji), true, NOW)
+      expect((await getCard(`r:${HOST.kanji}`))!.known).toBe(true)
+
+      // Un-knowing the kanji never reverses the radical (#9).
+      await markKnown(cardId('kanji', HOST.kanji), false, NOW)
+      expect((await getCard(cardId('kanji', HOST.kanji)))!.known).toBe(false)
+      expect((await getCard(`r:${HOST.kanji}`))!.known).toBe(true)
+    })
+
+    it('tolerates kanji without an identity radical card', async () => {
+      const loner = KANJI_DATA.find((e) => !RADICALS_DATA.some((r) => r.glyph === e.kanji))
+      if (!loner) return
+      const updated = (await markKnown(cardId('kanji', loner.kanji), true, NOW))!
+      expect(updated.known).toBe(true)
+    })
+  })
+
+  describe('no Ignore for radicals (decision #10)', () => {
+    it('markIgnored rejects radical ids outright', async () => {
+      const id = `r:${RADICALS_DATA[0].glyph}`
+      await expect(markIgnored(id, true)).rejects.toThrow(/radical/i)
+      expect((await getCard(id))!.ignored).toBe(false)
+    })
   })
 })
 
@@ -234,6 +361,8 @@ describe('settings', () => {
   it('applies defaults and merges partial updates', async () => {
     expect(await getSettings()).toEqual({
       newPerDay: 20,
+      newPerDayRadical: 60,
+      newPerDayVocab: 40,
       reviewLimit: 200,
       knownThresholdDays: 21,
       quiz: DEFAULT_QUIZ_CONFIG,
@@ -241,10 +370,26 @@ describe('settings', () => {
     await setSettings({ newPerDay: 5 })
     expect(await getSettings()).toEqual({
       newPerDay: 5,
+      newPerDayRadical: 60,
+      newPerDayVocab: 40,
       reviewLimit: 200,
       knownThresholdDays: 21,
       quiz: DEFAULT_QUIZ_CONFIG,
     })
+  })
+
+  it('defaults the new radical/vocab limits for saves written before they existed', async () => {
+    closeDb()
+    const raw = await openRawConnection()
+    try {
+      await rawPut(raw, 'settings', { newPerDay: 7, reviewLimit: 99, knownThresholdDays: 14 }, 'settings')
+    } finally {
+      raw.close()
+    }
+    closeDb()
+
+    const settings = await getSettings()
+    expect(settings).toMatchObject({ newPerDayRadical: 60, newPerDayVocab: 40 })
   })
 })
 
@@ -322,7 +467,7 @@ describe('quiz pools', () => {
     await getQuizPools()
     await getQuizPools()
     expect(await getLogs()).toHaveLength(1)
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length)
+    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
   })
 })
 
@@ -503,7 +648,7 @@ describe('known pool', () => {
     await getKnownPool('kanji')
     await getKnownPool('kanji')
     expect(await getLogs()).toHaveLength(0)
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length)
+    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
     expect(await getCard(cardId('kanji', KANJI_DATA[0].kanji))).toMatchObject({
       state: 'new',
       reps: 0,
@@ -781,32 +926,94 @@ describe('v2 → v3 migration', () => {
     await seedLegacyV2Data()
 
     await ensureSeeded()
-    expect(await getSeedStamp()).toEqual({ seeded: ['kanji'] })
-    expect(await getAllCards()).toHaveLength(2)
+    expect(await getSeedStamp()).toEqual({ seeded: ['kanji', 'radical'] })
+    const cards = await getAllCards()
+    expect(cards.filter((c) => typeOf(c.id) === 'kanji')).toHaveLength(2)
+    // The radical range is topped up on first run after the upgrade…
+    expect(cards.filter((c) => typeOf(c.id) === 'radical')).toHaveLength(RADICALS_DATA.length)
     expect(await getCard('k:一')).toMatchObject({ state: 'learning' })
 
     // The adoption survives a simulated reload.
     closeDb()
-    expect(await getSeedStamp()).toEqual({ seeded: ['kanji'] })
-    expect(await getAllCards()).toHaveLength(2)
+    expect(await getSeedStamp()).toEqual({ seeded: ['kanji', 'radical'] })
+    expect(await getAllCards()).toHaveLength(2 + RADICALS_DATA.length)
+  })
+
+  it('applies migration rule B while seeding radicals (#11): components of seen kanji start known', async () => {
+    closeDb()
+    await deleteDatabase()
+    const legacy = await openLegacyV2()
+    try {
+      // 三 decomposes into 一 + 二 — real components with their own cards.
+      await rawPut(legacy, 'cards', {
+        kanji: '三',
+        pos: 2,
+        known: false,
+        ignored: false,
+        knownPrev: null,
+        state: 'learning',
+        step: 0,
+        ease: STARTING_EASE,
+        interval: 0,
+        due: NOW + MIN_MS,
+        reps: 1,
+        lapses: 0,
+      })
+    } finally {
+      legacy.close()
+    }
+
+    await ensureSeeded()
+
+    // Both components were seeded straight into the known state via applyKnown.
+    for (const glyph of ['一', '二']) {
+      const radical = (await getCard(`r:${glyph}`))!
+      expect(radical.known).toBe(true)
+      expect(radical.state).toBe('review')
+      expect(radical.interval).toBe(DEFAULT_SETTINGS.knownThresholdDays)
+      expect(radical.due).toBeGreaterThan(NOW)
+      expect(radical.knownPrev).toMatchObject({ state: 'new' })
+      // No log entries for migrated radicals.
+      expect(await getLogs()).toHaveLength(0)
+    }
+
+    // An unrelated, never-seen component stays fresh.
+    const untouched = (await getCard('r:口'))!
+    expect(untouched.known).toBe(false)
+    expect(untouched.state).toBe('new')
+
+    // And the gated kanji is already in rotation right away — its components
+    // are all seen, so nothing blocks re-introducing or continuing it.
+    const q = await getSessionQueue('kanji', NOW)
+    expect(q.fresh.map((c) => c.id)).not.toContain('k:三')
+    const later = await getSessionQueue('kanji', NOW + MIN_MS)
+    expect(later.learning.map((c) => c.id)).toContain('k:三')
+
+    closeDb()
+    // Re-seeding never duplicates or resets the adopted radicals.
+    expect((await getAllCards()).filter((c) => typeOf(c.id) === 'radical')).toHaveLength(
+      RADICALS_DATA.length,
+    )
   })
 })
 
 describe('seed stamp', () => {
   it('is written by ensureSeeded and survives a reload', async () => {
     await ensureSeeded()
-    expect(await getSeedStamp()).toEqual({ seeded: ['kanji'] })
+    expect(await getSeedStamp()).toEqual({ seeded: ['kanji', 'radical'] })
     closeDb()
-    expect(await getSeedStamp()).toEqual({ seeded: ['kanji'] })
+    expect(await getSeedStamp()).toEqual({ seeded: ['kanji', 'radical'] })
   })
 
   it('resetProgress clears the stamp so every range reseeds', async () => {
     await answerCard('k:一', 'easy', NOW)
     await resetProgress()
-    expect(await getSeedStamp()).toEqual({ seeded: ['kanji'] })
+    expect(await getSeedStamp()).toEqual({ seeded: ['kanji', 'radical'] })
     expect(await getCard('k:一')).toMatchObject({ state: 'new', reps: 0, known: false })
+    // Reset wipes the rule-B state too: radicals come back fresh.
+    expect((await getCard('r:口'))).toMatchObject({ state: 'new', known: false })
     expect(await getLogs()).toHaveLength(0)
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length)
+    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
   })
 })
 
@@ -838,7 +1045,7 @@ describe('resetProgress', () => {
     await resetProgress()
     expect(await getCard('k:一')).toMatchObject({ state: 'new', reps: 0, known: false })
     expect(await getLogs()).toHaveLength(0)
-    expect(await getAllCards()).toHaveLength(KANJI_DATA.length)
+    expect(await getAllCards()).toHaveLength(KANJI_DATA.length + RADICALS_DATA.length)
   })
 })
 

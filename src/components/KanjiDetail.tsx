@@ -8,11 +8,12 @@ export interface KanjiDetailProps {
   entry: KanjiEntry
   card: SrsCard
   settings: Settings
+  /** `undefined` hides the whole drawing section (session overlays are read-only). */
   drawing?: string | null
   onToggleKnown: (known: boolean) => void
   onToggleIgnored: (ignored: boolean) => void
-  onDraw: () => void
-  onDeleteDrawing: () => void
+  onDraw?: () => void
+  onDeleteDrawing?: () => void
   onClose: () => void
 }
 
@@ -159,38 +160,40 @@ export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onT
             )}
           </section>
 
-          <section className="mt-5 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
-            <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              My drawing
-            </h3>
-            {drawing ? (
-              <img
-                src={drawing}
-                alt={`Hand-drawn mnemonic for ${entry.kanji}`}
-                className="h-32 w-32 rounded-lg border border-slate-200 dark:border-slate-700"
-              />
-            ) : (
-              <p className="italic text-slate-400 dark:text-slate-500">No drawing yet.</p>
-            )}
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={onDraw}
-                className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
-              >
-                {drawing ? 'Edit drawing' : 'Draw'}
-              </button>
-              {drawing && (
+          {drawing !== undefined && (
+            <section className="mt-5 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+              <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                My drawing
+              </h3>
+              {drawing ? (
+                <img
+                  src={drawing}
+                  alt={`Hand-drawn mnemonic for ${entry.kanji}`}
+                  className="h-32 w-32 rounded-lg border border-slate-200 dark:border-slate-700"
+                />
+              ) : (
+                <p className="italic text-slate-400 dark:text-slate-500">No drawing yet.</p>
+              )}
+              <div className="mt-3 flex gap-2">
                 <button
                   type="button"
-                  onClick={onDeleteDrawing}
-                  className="min-h-11 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700 transition active:scale-95 dark:border-red-900 dark:bg-red-950/50 dark:text-red-400"
+                  onClick={onDraw}
+                  className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
                 >
-                  Delete
+                  {drawing ? 'Edit drawing' : 'Draw'}
                 </button>
-              )}
-            </div>
-          </section>
+                {drawing && onDeleteDrawing && (
+                  <button
+                    type="button"
+                    onClick={onDeleteDrawing}
+                    className="min-h-11 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700 transition active:scale-95 dark:border-red-900 dark:bg-red-950/50 dark:text-red-400"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </div>

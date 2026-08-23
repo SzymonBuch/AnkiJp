@@ -1,30 +1,38 @@
 import { useEffect, useState } from 'react'
-import { getAllDrawings } from '../lib/db'
+import { getAllDrawings, getCard, getSettings, markIgnored, markKnown, type Settings } from '../lib/db'
 import { getKanji } from '../lib/kanji'
-import { bareId } from '../lib/srs'
-import type { Rating } from '../lib/srs'
+import { getRadical } from '../lib/radicals'
+import { bareId, cardId, typeOf, type ContentType, type Rating, type SrsCard } from '../lib/srs'
 import {
   useStudySession,
   type SessionKind,
   type SessionProgress,
 } from '../lib/useStudySession'
+import { KanjiDetail } from './KanjiDetail'
+import { RadicalCard } from './RadicalCard'
 import { StudyCard } from './StudyCard'
 
 interface SessionViewProps {
   kind: SessionKind
+  type?: ContentType
   title: string
   onExit: () => void
 }
 
-export function SessionView({ kind, title, onExit }: SessionViewProps) {
-  const session = useStudySession(kind)
+export function SessionView({ kind, type = 'kanji', title, onExit }: SessionViewProps) {
+  const session = useStudySession(kind, type)
   const { status, revealed, rate, reveal } = session
   const [drawings, setDrawings] = useState<Map<string, string>>(new Map())
+  const [settings, setSettings] = useState<Settings | null>(null)
+  /** Kanji detail opened from a radical's "used in" grid. */
+  const [selected, setSelected] = useState<SrsCard | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    getAllDrawings().then((list) => {
-      if (!cancelled) setDrawings(new Map(list.map((d) => [d.id, d.dataUrl])))
+    Promise.all([getAllDrawings(), getSettings()]).then(([drawingList, loadedSettings]) => {
+      if (cancelled) return
+      setDrawings(new Map(drawingList.map((d) => [d.id, d.dataUrl])))
+      setSettings(loadedSettings)
     })
     return () => {
       cancelled = true
@@ -40,6 +48,7 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
     }
     const onKey = (event: KeyboardEvent) => {
       if (event.repeat || status !== 'ready') return
+      if (selected !== null) return
       if (!revealed) {
         if (event.code === 'Space' || event.code === 'Enter') {
           event.preventDefault()
@@ -52,7 +61,19 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [status, revealed, rate, reveal])
+  }, [status, revealed, rate, reveal, selected])
+
+  const toggleSelectedKnown = async (known: boolean) => {
+    if (!selected) return
+    setSelected((await markKnown(selected.id, known)) ?? null)
+  }
+
+  const toggleSelectedIgnored = async (ignored: boolean) => {
+    if (!selected) return
+    setSelected((await markIgnored(selected.id, ignored)) ?? null)
+  }
+
+  const current = session.current
 
   return (
     <div className="flex min-h-svh flex-col">
@@ -80,16 +101,31 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
 
       <main className="mx-auto w-full max-w-xl flex-1 p-4">
         {status === 'loading' && <p className="py-12 text-center text-slate-500 dark:text-slate-400">Loading…</p>}
-        {status === 'ready' && session.current && (
-          <StudyCard
-            entry={getKanji(bareId(session.current.id))}
-            card={session.current}
-            revealed={revealed}
-            drawing={drawings.get(session.current.id) ?? null}
-            onReveal={reveal}
-            onRate={rate}
-            onIgnore={session.ignore}
-          />
+        {status === 'ready' && current && (
+          <>
+            {typeOf(current.id) === 'radical' ? (
+              <RadicalCard
+                entry={getRadical(bareId(current.id))}
+                card={current}
+                revealed={revealed}
+                onReveal={reveal}
+                onRate={rate}
+                onSelectKanji={(kanji) => {
+                  getCard(cardId('kanji', kanji)).then((card) => card && setSelected(card))
+                }}
+              />
+            ) : (
+              <StudyCard
+                entry={getKanji(bareId(current.id))}
+                card={current}
+                revealed={revealed}
+                drawing={drawings.get(current.id) ?? null}
+                onReveal={reveal}
+                onRate={rate}
+                onIgnore={session.canIgnore ? session.ignore : undefined}
+              />
+            )}
+          </>
         )}
         {(status === 'done' || status === 'empty') && (
           <Summary
@@ -99,6 +135,17 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
           />
         )}
       </main>
+
+      {selected && settings && (
+        <KanjiDetail
+          entry={getKanji(bareId(selected.id))}
+          card={selected}
+          settings={settings}
+          onToggleKnown={toggleSelectedKnown}
+          onToggleIgnored={toggleSelectedIgnored}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   )
 }
