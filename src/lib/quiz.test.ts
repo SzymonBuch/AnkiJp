@@ -3,6 +3,7 @@ import { KANJI_DATA, type KanjiEntry } from './kanji'
 import { RADICALS_DATA, type RadicalEntry } from './radicals'
 import { VOCAB_DATA, type VocabEntry } from './vocab'
 import {
+  buildMixedQuiz,
   buildQuiz,
   buildRadicalQuiz,
   buildVocabQuiz,
@@ -10,6 +11,7 @@ import {
   isClozeEligible,
   primaryReading,
   sampleKanji,
+  selectMixedTargets,
   selectQuizTargets,
   selectRadicalTargets,
   selectVocabTargets,
@@ -17,7 +19,8 @@ import {
   type QuizConfig,
   type VocabQuestion,
 } from './quiz'
-import { bareId, cardId, createCard, DAY_MS, STARTING_EASE, typeOf, type SrsCard } from './srs'
+import { bareId, cardId, createCard, DAY_MS, STARTING_EASE, typeOf, type ContentType, type SrsCard } from './srs'
+import type { QuizPools } from './db'
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0
@@ -649,5 +652,136 @@ describe('selectVocabTargets', () => {
       mulberry32(4),
     )
     expect(targets).toHaveLength(4)
+  })
+})
+
+describe('mixed scope: selectMixedTargets + buildMixedQuiz (Etap 5)', () => {
+  const NOW = new Date('2026-08-20T12:00:00Z').getTime()
+  const R = RADICALS_DATA.slice(0, 3)
+  const K = KANJI_DATA.filter((e) => e.grade === 1).slice(0, 3)
+  const K0 = KANJI_DATA.filter((e) => e.grade === 0).slice(0, 1)
+  const W = VOCAB_DATA.slice(200, 203)
+
+  function reviewCard(id: string, pos: number): SrsCard {
+    return { ...createCard(id, pos, NOW), state: 'review', interval: 30, due: NOW + 30 * DAY_MS }
+  }
+
+  function poolsFor(cards: SrsCard[]): QuizPools {
+    return { known: cards, progress: [], new: [] }
+  }
+
+  function makePoolsByType(withGrade0 = false): Record<ContentType, QuizPools> {
+    return {
+      radical: poolsFor(R.map((r) => reviewCard(cardId('radical', r.glyph), RADICALS_DATA.indexOf(r)))),
+      kanji: poolsFor(
+        [...K, ...(withGrade0 ? K0 : [])].map((e) =>
+          reviewCard(cardId('kanji', e.kanji), KANJI_DATA.indexOf(e)),
+        ),
+      ),
+      vocab: poolsFor(W.map((w) => reviewCard(`w:${w.id}`, VOCAB_DATA.indexOf(w)))),
+    }
+  }
+
+  it('samples targets from all three content types at once', () => {
+    const targets = selectMixedTargets(
+      { ...DEFAULT_QUIZ_CONFIG, sources: ['known'], count: 100 },
+      makePoolsByType(),
+      NOW,
+      mulberry32(1),
+    )
+    expect(targets.radical.map((r) => r.glyph).sort()).toEqual(R.map((r) => r.glyph).sort())
+    expect(targets.kanji.map((k) => k.kanji).sort()).toEqual(K.map((k) => k.kanji).sort())
+    expect(targets.vocab.map((w) => w.id).sort()).toEqual(W.map((w) => w.id).sort())
+  })
+
+  it('grade filter narrows only the kanji portion — radicals and words never drop (#Etap5)', () => {
+    const pools = makePoolsByType(true)
+    const defaultRun = selectMixedTargets(
+      { ...DEFAULT_QUIZ_CONFIG, sources: ['known'], count: 100 },
+      pools,
+      NOW,
+      mulberry32(2),
+    )
+    // Default grades [1–6]: the grade-0 kanji is out, everything else stays.
+    expect(defaultRun.kanji).toHaveLength(K.length)
+    for (const entry of defaultRun.kanji) expect(entry.grade).toBeGreaterThan(0)
+    expect(defaultRun.radical).toHaveLength(R.length)
+    expect(defaultRun.vocab).toHaveLength(W.length)
+
+    const g0Only = selectMixedTargets(
+      { ...DEFAULT_QUIZ_CONFIG, sources: ['known'], grades: [0], count: 100 },
+      pools,
+      NOW,
+      mulberry32(3),
+    )
+    expect(g0Only.kanji.map((k) => ({ kanji: k.kanji, grade: k.grade }))).toEqual(
+      K0.map((e) => ({ kanji: e.kanji, grade: 0 })),
+    )
+    expect(g0Only.radical).toHaveLength(R.length)
+    expect(g0Only.vocab).toHaveLength(W.length)
+  })
+
+  it('dueOnly applies across all types; problematicOnly picks exactly the lapsing cards', () => {
+    const pools = makePoolsByType()
+    const dueOnly = selectMixedTargets(
+      { ...DEFAULT_QUIZ_CONFIG, sources: ['known'], count: 100, dueOnly: true },
+      pools,
+      NOW,
+      mulberry32(4),
+    )
+    // Every seeded card is due in 30 days — nothing qualifies in any type.
+    expect(dueOnly.radical).toEqual([])
+    expect(dueOnly.kanji).toEqual([])
+    expect(dueOnly.vocab).toEqual([])
+
+    pools.radical.known[0].lapses = 1
+    pools.kanji.known[0].lapses = 1
+    pools.vocab.known[0].lapses = 1
+    const problematic = selectMixedTargets(
+      { ...DEFAULT_QUIZ_CONFIG, sources: ['known'], count: 100, problematicOnly: true },
+      pools,
+      NOW,
+      mulberry32(5),
+    )
+    expect(problematic.radical.map((r) => r.glyph)).toEqual([R[0].glyph])
+    expect(problematic.kanji.map((k) => k.kanji)).toEqual([K[0].kanji])
+    expect(problematic.vocab.map((w) => w.id)).toEqual([W[0].id])
+  })
+
+  it('buildMixedQuiz: radicals fall back to meaning mode, vocab reading hides furigana, indices are contiguous', () => {
+    const targets = { radical: [R[0]], kanji: [K[0]], vocab: [W[0]] }
+    const all = { kanji: KANJI_DATA, radical: RADICALS_DATA, vocab: VOCAB_DATA }
+    const quiz = buildMixedQuiz('reading', targets, all, mulberry32(6))
+
+    expect(quiz).toHaveLength(3)
+    expect(quiz.map((q) => q.index).sort((a, b) => a - b)).toEqual([0, 1, 2])
+
+    const radicalQ = quiz.find((q) => q.kind === 'radical')!
+    expect(radicalQ.mode).toBe('meaning')
+    expect(radicalQ.correct).toBe(R[0].keyword)
+
+    const kanjiQ = quiz.find((q) => q.kind === 'kanji')!
+    expect(kanjiQ.mode).toBe('reading')
+    expect(kanjiQ.correct).toBe(primaryReading(K[0]))
+
+    const vocabQ = quiz.find((q) => q.kind === 'vocab')! as VocabQuestion
+    expect(vocabQ.mode).toBe('reading')
+    expect(vocabQ.hideFurigana).toBe(true)
+    expect(vocabQ.furiganaHtml).toBeUndefined()
+    expect(vocabQ.prompt).not.toContain('<ruby>')
+
+    for (const q of quiz) {
+      expect(q.options).toHaveLength(4)
+      expect(new Set(q.options).size).toBe(4)
+      expect(q.options.filter((option) => option === q.correct)).toHaveLength(1)
+    }
+  })
+
+  it('buildMixedQuiz is deterministic for a given rng sequence', () => {
+    const targets = { radical: R, kanji: K, vocab: W }
+    const all = { kanji: KANJI_DATA, radical: RADICALS_DATA, vocab: VOCAB_DATA }
+    expect(buildMixedQuiz('mixed', targets, all, mulberry32(8))).toEqual(
+      buildMixedQuiz('mixed', targets, all, mulberry32(8)),
+    )
   })
 })

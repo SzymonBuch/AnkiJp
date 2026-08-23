@@ -150,48 +150,51 @@ export function QuizSetup({
           </div>
         </div>
 
-        {scope === 'kanji' && (
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Grade
-            </h3>
-            <div className="flex flex-wrap gap-2">
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Grade
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            <Chip
+              label="G0"
+              pressed={config.grades.includes(0)}
+              onClick={() => toggleGrade(0)}
+            />
+            {GRADES.map((grade) => (
               <Chip
-                label="G0"
-                pressed={config.grades.includes(0)}
-                onClick={() => toggleGrade(0)}
+                key={grade}
+                label={`G${grade}`}
+                pressed={config.grades.includes(grade)}
+                onClick={() => toggleGrade(grade)}
               />
-              {GRADES.map((grade) => (
-                <Chip
-                  key={grade}
-                  label={`G${grade}`}
-                  pressed={config.grades.includes(grade)}
-                  onClick={() => toggleGrade(grade)}
-                />
-              ))}
-            </div>
-            {!config.grades.includes(0) && (
-              <p className="text-xs text-slate-400 dark:text-slate-500">
-                G0 covers the extra kanji that entered the deck through the top-2000 vocabulary.
-              </p>
-            )}
+            ))}
           </div>
-        )}
+          {/* Filters stay visible in every scope: grade narrows only the kanji
+              portion of a mixed pool, due/problematic apply to all types. */}
+          {scope !== 'kanji' && (
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              Applies to the kanji portion of this pool.
+            </p>
+          )}
+          {scope === 'kanji' && !config.grades.includes(0) && (
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              G0 covers the extra kanji that entered the deck through the top-2000 vocabulary.
+            </p>
+          )}
+        </div>
 
-        {scope === 'kanji' && (
-          <div className="flex gap-2">
-            <Toggle
-              label="Due today only"
-              pressed={config.dueOnly}
-              onClick={() => onChange({ dueOnly: !config.dueOnly })}
-            />
-            <Toggle
-              label="Problematic"
-              pressed={config.problematicOnly}
-              onClick={() => onChange({ problematicOnly: !config.problematicOnly })}
-            />
-          </div>
-        )}
+        <div className="flex gap-2">
+          <Toggle
+            label="Due today only"
+            pressed={config.dueOnly}
+            onClick={() => onChange({ dueOnly: !config.dueOnly })}
+          />
+          <Toggle
+            label="Problematic"
+            pressed={config.problematicOnly}
+            onClick={() => onChange({ problematicOnly: !config.problematicOnly })}
+          />
+        </div>
 
         <Stepper
           label="Questions"
