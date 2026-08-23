@@ -53,12 +53,12 @@ export function SettingsScreen({ onExit }: SettingsScreenProps) {
       getSettings(),
       getLogs(),
       getAllCards(),
-      getSummary(),
+      getSummary('kanji'),
       getAllDrawings(),
     ])
     const payload = {
       exportedAt: new Date().toISOString(),
-      version: 2,
+      version: 3,
       settings,
       summary,
       stats: computeStats(logs),

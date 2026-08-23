@@ -22,7 +22,7 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([getSummary(), getLogs()]).then(([summaryResult, logs]) => {
+    Promise.all([getSummary('kanji'), getLogs()]).then(([summaryResult, logs]) => {
       if (cancelled) return
       const stats = computeStats(logs)
       setSummary(summaryResult)

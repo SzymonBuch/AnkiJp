@@ -1,6 +1,34 @@
 export type Rating = 'again' | 'hard' | 'good' | 'easy'
 export type CardState = 'new' | 'learning' | 'review' | 'relearning'
 
+/** Kind of content a card teaches. The id prefix is the single source of truth. */
+export type ContentType = 'kanji' | 'radical' | 'vocab'
+
+/** Namespace prefixes keeping overlapping glyphs apart (`k:一` vs `r:一`). */
+const TYPE_PREFIXES: Record<ContentType, string> = {
+  kanji: 'k:',
+  radical: 'r:',
+  vocab: 'w:',
+}
+
+/** Namespaced card id for `bare` content of `type` (e.g. `k:一`, `r:氵`, `w:食べる`). */
+export function cardId(type: ContentType, bare: string): string {
+  return TYPE_PREFIXES[type] + bare
+}
+
+/** Derive the content type from an id's namespace prefix. */
+export function typeOf(id: string): ContentType {
+  for (const type of Object.keys(TYPE_PREFIXES) as ContentType[]) {
+    if (id.startsWith(TYPE_PREFIXES[type])) return type
+  }
+  throw new Error(`Malformed card id: ${id}`)
+}
+
+/** Id without its namespace prefix — the glyph or word form itself. */
+export function bareId(id: string): string {
+  return id.slice(id.indexOf(':') + 1)
+}
+
 /** Fully reproducible SRS state, captured when a card is marked as known. */
 export interface KnownSnapshot {
   state: CardState
@@ -13,7 +41,8 @@ export interface KnownSnapshot {
 }
 
 export interface SrsCard {
-  kanji: string
+  /** Namespaced card id (`k:一`, `r:氵`, `w:食べる`). */
+  id: string
   /** Position in the study order (seed order), used to order new cards. */
   pos: number
   /** Manually marked as "known" (e.g. in the Deck). Included in quiz pools. */
@@ -57,9 +86,9 @@ export const MAX_INTERVAL_DAYS = 36500
 export const DAY_MS = 86_400_000
 export const MIN_MS = 60_000
 
-export function createCard(kanji: string, pos: number, now: number): SrsCard {
+export function createCard(id: string, pos: number, now: number): SrsCard {
   return {
-    kanji,
+    id,
     pos,
     known: false,
     ignored: false,

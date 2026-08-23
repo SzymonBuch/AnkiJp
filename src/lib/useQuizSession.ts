@@ -11,7 +11,7 @@ import {
   type QuizMode,
   type QuizQuestion,
 } from './quiz'
-import type { SrsCard } from './srs'
+import { bareId, type SrsCard } from './srs'
 
 export type QuizStatus = 'loading' | 'setup' | 'ready' | 'done' | 'empty'
 
@@ -95,7 +95,7 @@ export function useQuizSession(): QuizSession {
   const counts = useMemo<QuizSourceCounts>(() => {
     const grades = new Set(config.grades)
     const matches = (cards: SrsCard[]) =>
-      cards.filter((c) => passesFilters(c, config, snapshotAt) && grades.has(getKanji(c.kanji).grade))
+      cards.filter((c) => passesFilters(c, config, snapshotAt) && grades.has(getKanji(bareId(c.id)).grade))
         .length
     return { known: matches(pools.known), progress: matches(pools.progress), new: matches(pools.new) }
   }, [pools, config, snapshotAt])
@@ -103,7 +103,7 @@ export function useQuizSession(): QuizSession {
   const maxCount = config.sources.reduce((sum, source) => sum + counts[source], 0)
 
   const maxExtraNew = useMemo(
-    () => pools.new.filter((c) => new Set(config.grades).has(getKanji(c.kanji).grade)).length,
+    () => pools.new.filter((c) => new Set(config.grades).has(getKanji(bareId(c.id)).grade)).length,
     [pools, config],
   )
 
@@ -113,9 +113,9 @@ export function useQuizSession(): QuizSession {
     let eligible = 0
     const consider = (cards: SrsCard[], applyFilters: boolean) => {
       for (const card of cards) {
-        if (seen.has(card.kanji)) continue
-        seen.add(card.kanji)
-        const entry = getKanji(card.kanji)
+        if (seen.has(card.id)) continue
+        seen.add(card.id)
+        const entry = getKanji(bareId(card.id))
         if (!grades.has(entry.grade)) continue
         if (applyFilters && !passesFilters(card, config, snapshotAt)) continue
         if (isClozeEligible(entry)) eligible++
@@ -216,7 +216,7 @@ export function useQuizSession(): QuizSession {
 /** Clamp `count`/`extraNew` to what the snapshot actually offers right now. */
 function clampConfig(config: QuizConfig, pools: QuizPools, now: number): QuizConfig {
   const grades = new Set(config.grades)
-  const inGrades = (card: SrsCard) => grades.has(getKanji(card.kanji).grade)
+  const inGrades = (card: SrsCard) => grades.has(getKanji(bareId(card.id)).grade)
   const poolSize = config.sources.reduce(
     (sum, source) =>
       sum + pools[source].filter((c) => passesFilters(c, config, now) && inGrades(c)).length,

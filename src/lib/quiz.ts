@@ -1,5 +1,5 @@
 import { getKanji, type KanjiEntry } from './kanji'
-import { DAY_MS, STARTING_EASE, type SrsCard } from './srs'
+import { bareId, DAY_MS, STARTING_EASE, type SrsCard } from './srs'
 import type { QuizPools } from './db'
 
 export type QuizSource = 'known' | 'progress' | 'new'
@@ -95,7 +95,7 @@ export function selectQuizTargets(
   const sourceCards = config.sources.flatMap((source) => pools[source] ?? [])
   const candidates = sourceCards
     .filter((card) => passesFilters(card, config, now))
-    .map((card) => getKanji(card.kanji))
+    .map((card) => getKanji(bareId(card.id)))
     .filter((entry) => grades.has(entry.grade))
     .filter((entry) => opts.predicate?.(entry) ?? true)
   for (const entry of sampleKanji(candidates, config.count, rng)) {
@@ -107,7 +107,7 @@ export function selectQuizTargets(
 
   if (config.extraNew > 0) {
     const extraCandidates = pools.new
-      .map((card) => getKanji(card.kanji))
+      .map((card) => getKanji(bareId(card.id)))
       .filter((entry) => grades.has(entry.grade) && !selected.has(entry.kanji))
     for (const entry of sampleKanji(extraCandidates, config.extraNew, rng)) {
       if (!selected.has(entry.kanji)) {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getAllDrawings } from '../lib/db'
 import { getKanji } from '../lib/kanji'
+import { bareId } from '../lib/srs'
 import type { Rating } from '../lib/srs'
 import {
   useStudySession,
@@ -23,7 +24,7 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
   useEffect(() => {
     let cancelled = false
     getAllDrawings().then((list) => {
-      if (!cancelled) setDrawings(new Map(list.map((d) => [d.kanji, d.dataUrl])))
+      if (!cancelled) setDrawings(new Map(list.map((d) => [d.id, d.dataUrl])))
     })
     return () => {
       cancelled = true
@@ -81,10 +82,10 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
         {status === 'loading' && <p className="py-12 text-center text-slate-500 dark:text-slate-400">Loading…</p>}
         {status === 'ready' && session.current && (
           <StudyCard
-            entry={getKanji(session.current.kanji)}
+            entry={getKanji(bareId(session.current.id))}
             card={session.current}
             revealed={revealed}
-            drawing={drawings.get(session.current.kanji) ?? null}
+            drawing={drawings.get(session.current.id) ?? null}
             onReveal={reveal}
             onRate={rate}
             onIgnore={session.ignore}

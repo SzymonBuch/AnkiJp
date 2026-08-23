@@ -1,17 +1,38 @@
 import { openDB, type IDBPDatabase, type DBSchema } from 'idb'
-import { createCard, DAY_MS, rateCard, type CardState, type KnownSnapshot, type Rating, type SrsCard } from './srs'
+import {
+  createCard,
+  cardId,
+  typeOf,
+  DAY_MS,
+  rateCard,
+  type CardState,
+  type ContentType,
+  type KnownSnapshot,
+  type Rating,
+  type SrsCard,
+} from './srs'
 import { KANJI_DATA } from './kanji'
 import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
 
 export const DB_NAME = 'ankijp'
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 const SETTINGS_KEY = 'settings'
+const SEED_STAMP_KEY = 'seed-stamp'
 
 export interface Settings {
   newPerDay: number
   reviewLimit: number
   knownThresholdDays: number
   quiz: QuizConfig
+}
+
+/**
+ * Marks which content ranges have already been seeded (stored in the settings
+ * store). Lets future seeds top up existing databases instead of being blocked
+ * by the old "cards exist" early return.
+ */
+export interface SeedStamp {
+  seeded: ContentType[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -23,7 +44,8 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export interface ReviewLog {
   id?: number
-  kanji: string
+  /** Namespaced id of the answered card (the autoincrement key owns `id`). */
+  cardId: string
   rating: Rating
   prevState: CardState
   newState: CardState
@@ -33,9 +55,9 @@ export interface ReviewLog {
   timestamp: number
 }
 
-/** User-drawn mnemonic sketch for a kanji (F3 drawing pad). */
+/** User-drawn mnemonic sketch for a card (F3 drawing pad). */
 export interface Drawing {
-  kanji: string
+  id: string
   dataUrl: string
   updatedAt: number
 }
@@ -52,7 +74,7 @@ interface AnkiJpDB extends DBSchema {
   }
   settings: {
     key: string
-    value: Settings
+    value: Settings | SeedStamp
   }
   drawings: {
     key: string
@@ -60,26 +82,38 @@ interface AnkiJpDB extends DBSchema {
   }
 }
 
+/** Pre-v3 records keyed/labelled by a bare glyph. */
+interface LegacyGlyphRecord {
+  kanji: string
+  [key: string]: unknown
+}
+
 let dbPromise: Promise<IDBPDatabase<AnkiJpDB>> | null = null
 
 function getDb(): Promise<IDBPDatabase<AnkiJpDB>> {
   dbPromise ??= openDB<AnkiJpDB>(DB_NAME, DB_VERSION, {
     async upgrade(db, oldVersion, _newVersion, tx) {
-      if (!db.objectStoreNames.contains('cards')) {
-        db.createObjectStore('cards', { keyPath: 'kanji' })
+      const hadCards = db.objectStoreNames.contains('cards')
+      const hadLog = db.objectStoreNames.contains('log')
+      const hadDrawings = db.objectStoreNames.contains('drawings')
+
+      if (!hadCards) {
+        db.createObjectStore('cards', { keyPath: 'id' })
       }
-      if (!db.objectStoreNames.contains('log')) {
+      if (!hadLog) {
         const logStore = db.createObjectStore('log', { keyPath: 'id', autoIncrement: true })
         logStore.createIndex('by-timestamp', 'timestamp')
       }
       if (!db.objectStoreNames.contains('settings')) {
         db.createObjectStore('settings')
       }
-      // Reserved for the drawing pad (F3); created in the same version bump.
-      if (!db.objectStoreNames.contains('drawings')) {
-        db.createObjectStore('drawings', { keyPath: 'kanji' })
+      // Reserved for the drawing pad (F3); created alongside the v2 bump.
+      if (!hadDrawings) {
+        db.createObjectStore('drawings', { keyPath: 'id' })
       }
-      if (oldVersion < 2) {
+
+      if (oldVersion < 2 && hadCards) {
+        // v1 → v2: default the fields introduced in v2.
         const store = tx.objectStore('cards')
         for (const card of await store.getAll()) {
           const legacy = card as Partial<SrsCard>
@@ -88,6 +122,45 @@ function getDb(): Promise<IDBPDatabase<AnkiJpDB>> {
             ignored: legacy.ignored ?? false,
             knownPrev: legacy.knownPrev ?? null,
           })
+        }
+      }
+
+      if (oldVersion < 3 && (hadCards || hadLog || hadDrawings)) {
+        // v2 → v3: card ids become namespaced (`k:一`). cards/drawings move to
+        // keyPath 'id'; IndexedDB cannot rewrite a keyPath in place, so both
+        // stores are rebuilt within this upgrade transaction. Log values
+        // rename `kanji` → `cardId` with the same prefix — the store's own
+        // autoincrement key already occupies `id`.
+        const legacyCards = hadCards
+          ? ((await tx.objectStore('cards').getAll()) as unknown as LegacyGlyphRecord[])
+          : []
+        const legacyDrawings = hadDrawings
+          ? ((await tx.objectStore('drawings').getAll()) as unknown as LegacyGlyphRecord[])
+          : []
+        const legacyLogs = hadLog
+          ? ((await tx.objectStore('log').getAll()) as unknown as LegacyGlyphRecord[])
+          : []
+
+        if (hadCards) db.deleteObjectStore('cards')
+        if (hadDrawings) db.deleteObjectStore('drawings')
+
+        if (hadCards) {
+          const store = db.createObjectStore('cards', { keyPath: 'id' })
+          for (const { kanji, ...rest } of legacyCards) {
+            await store.put({ ...rest, id: `k:${kanji}` } as SrsCard)
+          }
+        }
+        if (hadDrawings) {
+          const store = db.createObjectStore('drawings', { keyPath: 'id' })
+          for (const { kanji, ...rest } of legacyDrawings) {
+            await store.put({ ...rest, id: `k:${kanji}` } as Drawing)
+          }
+        }
+        if (hadLog) {
+          const store = tx.objectStore('log')
+          for (const { kanji, ...rest } of legacyLogs) {
+            await store.put({ ...rest, cardId: `k:${kanji}` } as ReviewLog)
+          }
         }
       }
     },
@@ -102,21 +175,45 @@ export function closeDb(): void {
   promise?.then((db) => db.close()).catch(() => undefined)
 }
 
-/** Seed the cards store from bundled data on first run. Idempotent. */
-export async function ensureSeeded(): Promise<void> {
-  const db = await getDb()
-  const count = await db.count('cards')
-  if (count > 0) return
-  const now = Date.now()
-  const tx = db.transaction('cards', 'readwrite')
-  KANJI_DATA.forEach((entry, pos) => {
-    tx.store.put(createCard(entry.kanji, pos, now))
-  })
-  await tx.done
+async function readSeedStamp(db: IDBPDatabase<AnkiJpDB>): Promise<Set<ContentType>> {
+  const raw = (await db.get('settings', SEED_STAMP_KEY)) as SeedStamp | undefined
+  return new Set(raw?.seeded ?? [])
 }
 
-export async function getCard(kanji: string): Promise<SrsCard | undefined> {
-  return (await getDb()).get('cards', kanji)
+/** Current seed stamp — which content ranges have been seeded into this database. */
+export async function getSeedStamp(): Promise<SeedStamp> {
+  return { seeded: [...await readSeedStamp(await getDb())] }
+}
+
+async function stampSeeded(db: IDBPDatabase<AnkiJpDB>, type: ContentType): Promise<void> {
+  const seeded = await readSeedStamp(db)
+  if (seeded.has(type)) return
+  const next = { seeded: [...seeded, type] } satisfies SeedStamp
+  await db.put('settings', next, SEED_STAMP_KEY)
+}
+
+/**
+ * Seed missing content ranges from bundled data. Idempotent, driven by the
+ * seed stamp so future ranges can top up databases that already have cards.
+ * Databases predating stamps carry cards without a stamp: they are adopted
+ * (marked as seeded) instead of reseeded over live progress.
+ */
+export async function ensureSeeded(): Promise<void> {
+  const db = await getDb()
+  if ((await readSeedStamp(db)).has('kanji')) return
+  if ((await db.count('cards')) === 0) {
+    const now = Date.now()
+    const tx = db.transaction('cards', 'readwrite')
+    KANJI_DATA.forEach((entry, pos) => {
+      tx.store.put(createCard(cardId('kanji', entry.kanji), pos, now))
+    })
+    await tx.done
+  }
+  await stampSeeded(db, 'kanji')
+}
+
+export async function getCard(id: string): Promise<SrsCard | undefined> {
+  return (await getDb()).get('cards', id)
 }
 
 export async function getAllCards(): Promise<SrsCard[]> {
@@ -134,16 +231,16 @@ export async function bulkPutCards(cards: SrsCard[]): Promise<void> {
   await tx.done
 }
 
-export async function getDrawing(kanji: string): Promise<Drawing | undefined> {
-  return (await getDb()).get('drawings', kanji)
+export async function getDrawing(id: string): Promise<Drawing | undefined> {
+  return (await getDb()).get('drawings', id)
 }
 
 export async function putDrawing(drawing: Drawing): Promise<void> {
   await (await getDb()).put('drawings', drawing)
 }
 
-export async function deleteDrawing(kanji: string): Promise<void> {
-  await (await getDb()).delete('drawings', kanji)
+export async function deleteDrawing(id: string): Promise<void> {
+  await (await getDb()).delete('drawings', id)
 }
 
 export async function getAllDrawings(): Promise<Drawing[]> {
@@ -165,7 +262,8 @@ export async function getLogs(): Promise<ReviewLog[]> {
 
 export async function getSettings(): Promise<Settings> {
   const db = await getDb()
-  const saved = await db.get('settings', SETTINGS_KEY)
+  // The settings store also hosts the seed stamp; narrow to the settings record.
+  const saved = (await db.get('settings', SETTINGS_KEY)) as Settings | undefined
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
@@ -187,13 +285,18 @@ export interface DailyCounts {
   reviewsToday: number
 }
 
-export async function getDailyCounts(now = Date.now()): Promise<DailyCounts> {
+/**
+ * Today's counts from the log. With `type`, both counters cover only that
+ * content type (via the id prefix); without it, all types are aggregated.
+ */
+export async function getDailyCounts(now = Date.now(), type?: ContentType): Promise<DailyCounts> {
   const start = startOfDay(now)
   const range = IDBKeyRange.bound(start, now)
   const logs = await (await getDb()).getAllFromIndex('log', 'by-timestamp', range)
   let newToday = 0
   let reviewsToday = 0
   for (const log of logs) {
+    if (type !== undefined && typeOf(log.cardId) !== type) continue
     if (log.prevState === 'new') newToday++
     else if (log.prevState === 'review') reviewsToday++
   }
@@ -209,44 +312,58 @@ export interface SessionQueue {
   fresh: SrsCard[]
 }
 
-export async function getSessionQueue(now = Date.now()): Promise<SessionQueue> {
+/**
+ * Build the session queue for one content type. The daily new-card budget is
+ * per type; the review limit stays global across types.
+ */
+export async function getSessionQueue(
+  type: ContentType = 'kanji',
+  now = Date.now(),
+): Promise<SessionQueue> {
   await ensureSeeded()
-  const [settings, cards, counts] = await Promise.all([
+  const [settings, cards, counts, globalCounts] = await Promise.all([
     getSettings(),
     getAllCards(),
+    getDailyCounts(now, type),
     getDailyCounts(now),
   ])
   const endOfToday = startOfDay(now) + DAY_MS
+  const ofType = cards.filter((c) => typeOf(c.id) === type && !c.ignored)
 
-  const learning = cards
-    .filter((c) => (c.state === 'learning' || c.state === 'relearning') && c.due <= now && !c.ignored)
+  const learning = ofType
+    .filter((c) => c.state === 'learning' || c.state === 'relearning')
+    .filter((c) => c.due <= now)
     .sort((a, b) => a.due - b.due)
 
-  const review = cards
-    .filter((c) => c.state === 'review' && c.due <= endOfToday && !c.ignored)
+  const review = ofType
+    .filter((c) => c.state === 'review' && c.due <= endOfToday)
     .sort((a, b) => a.due - b.due)
-    .slice(0, Math.max(0, settings.reviewLimit - counts.reviewsToday))
+    .slice(0, Math.max(0, settings.reviewLimit - globalCounts.reviewsToday))
 
-  const fresh = cards
-    .filter((c) => c.state === 'new' && !c.ignored)
+  const fresh = ofType
+    .filter((c) => c.state === 'new')
     .sort((a, b) => a.pos - b.pos)
     .slice(0, Math.max(0, settings.newPerDay - counts.newToday))
 
   return { learning, review, fresh }
 }
 
-/** Rate a card and persist the new state together with a log entry. */
+/**
+ * Rate a card and persist the new state together with a log entry.
+ * Answering a card that was never materialized is an error — no ghost cards.
+ */
 export async function answerCard(
-  kanji: string,
+  id: string,
   rating: Rating,
   now = Date.now(),
 ): Promise<SrsCard> {
   await ensureSeeded()
-  const card = (await getCard(kanji)) ?? createCard(kanji, 0, now)
+  const card = await getCard(id)
+  if (!card) throw new Error(`Cannot answer unknown card: ${id}`)
   const updated = rateCard(card, rating, now)
   await putCard(updated)
   await addLog({
-    kanji,
+    cardId: id,
     rating,
     prevState: card.state,
     newState: updated.state,
@@ -260,8 +377,13 @@ export async function answerCard(
 
 export async function resetProgress(): Promise<void> {
   const db = await getDb()
-  const tx = db.transaction(['cards', 'log'], 'readwrite')
-  await Promise.all([tx.objectStore('cards').clear(), tx.objectStore('log').clear()])
+  const tx = db.transaction(['cards', 'log', 'settings'], 'readwrite')
+  await Promise.all([
+    tx.objectStore('cards').clear(),
+    tx.objectStore('log').clear(),
+    // Clear the seed stamp too so ensureSeeded reseeds every range.
+    tx.objectStore('settings').delete(SEED_STAMP_KEY),
+  ])
   await tx.done
   await ensureSeeded()
 }
@@ -273,11 +395,11 @@ export async function resetProgress(): Promise<void> {
  * `false`: restore the snapshotted state (legacy cards without one just lose the flag).
  */
 export async function markKnown(
-  kanji: string,
+  id: string,
   known: boolean,
   now = Date.now(),
 ): Promise<SrsCard | undefined> {
-  const card = await getCard(kanji)
+  const card = await getCard(id)
   if (!card) return undefined
   const updated = known ? await applyKnown(card, now) : undoKnown(card)
   await putCard(updated)
@@ -323,13 +445,16 @@ export interface Summary {
 }
 
 /** Lightweight counters for dashboards; `known` = review cards at/over the known threshold. */
-export async function getSummary(now = Date.now()): Promise<Summary> {
+export async function getSummary(
+  type: ContentType = 'kanji',
+  now = Date.now(),
+): Promise<Summary> {
   await ensureSeeded()
   const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
   const endOfToday = startOfDay(now) + DAY_MS
   const summary: Summary = { fresh: 0, learning: 0, due: 0, known: 0, future: 0 }
   for (const card of cards) {
-    if (card.ignored) continue
+    if (card.ignored || typeOf(card.id) !== type) continue
     if (card.state === 'new') summary.fresh++
     else if (card.state === 'learning' || card.state === 'relearning') summary.learning++
     else {
@@ -342,22 +467,22 @@ export async function getSummary(now = Date.now()): Promise<Summary> {
 }
 
 export interface KnownPool {
-  /** Kanji that are "known": interval at/over the threshold or manually marked. */
-  kanji: string[]
+  /** Cards that are "known": interval at/over the threshold or manually marked. */
+  ids: string[]
   thresholdDays: number
 }
 
 /**
- * Ban ("Ignore") or un-ban a kanji (no log entry).
+ * Ban ("Ignore") or un-ban a card (no log entry).
  * `true`: an ignored card leaves every queue, pool and summary; if it was
  * marked known, the flag is undone first (restoring the snapshotted state).
  * `false`: the card returns to its normal state-based behavior.
  */
 export async function markIgnored(
-  kanji: string,
+  id: string,
   ignored: boolean,
 ): Promise<SrsCard | undefined> {
-  const card = await getCard(kanji)
+  const card = await getCard(id)
   if (!card) return undefined
   const updated = ignored ? { ...undoKnown(card), ignored: true } : { ...card, ignored: false }
   await putCard(updated)
@@ -365,17 +490,23 @@ export async function markIgnored(
 }
 
 /**
- * Kanji eligible for quiz pools — only "known" kanji (interval >= threshold
- * or manually marked). Read-only: never modifies cards or logs.
+ * Cards eligible for quiz pools of one content type — only "known" cards
+ * (interval >= threshold or manually marked). Read-only: never modifies
+ * cards or logs.
  */
-export async function getKnownPool(): Promise<KnownPool> {
+export async function getKnownPool(type: ContentType = 'kanji'): Promise<KnownPool> {
   await ensureSeeded()
   const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
   return {
-    kanji: cards
-      .filter((c) => (c.known || c.interval >= settings.knownThresholdDays) && !c.ignored)
+    ids: cards
+      .filter(
+        (c) =>
+          typeOf(c.id) === type &&
+          !c.ignored &&
+          (c.known || c.interval >= settings.knownThresholdDays),
+      )
       .sort((a, b) => a.pos - b.pos)
-      .map((c) => c.kanji),
+      .map((c) => c.id),
     thresholdDays: settings.knownThresholdDays,
   }
 }
@@ -391,15 +522,17 @@ export interface QuizPools {
 
 /**
  * Card pools for quiz setup. Read-only: never modifies cards or logs.
- * Ignored cards are excluded; each pool is sorted by seed position. Returns
- * cards (not kanji) so filters can use `due`/`lapses`/`ease`.
+ * Only kanji cards are pooled — the quiz pipeline (grades, `getKanji`) is
+ * kanji-specific; per-type quiz pools arrive with their own stages. Ignored
+ * cards are excluded; each pool is sorted by seed position. Returns cards
+ * (not ids) so filters can use `due`/`lapses`/`ease`.
  */
 export async function getQuizPools(): Promise<QuizPools> {
   await ensureSeeded()
   const [settings, cards] = await Promise.all([getSettings(), getAllCards()])
   const pools: QuizPools = { known: [], progress: [], new: [] }
   for (const card of cards) {
-    if (card.ignored) continue
+    if (card.ignored || typeOf(card.id) !== 'kanji') continue
     if (card.known || card.interval >= settings.knownThresholdDays) pools.known.push(card)
     else if (card.state === 'new') pools.new.push(card)
     else pools.progress.push(card)

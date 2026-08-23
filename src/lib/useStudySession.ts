@@ -40,7 +40,7 @@ export function useStudySession(kind: SessionKind): StudySession {
   const busy = useRef(false)
 
   const loadQueue = useCallback(async (): Promise<SrsCard[]> => {
-    const queue = await getSessionQueue()
+    const queue = await getSessionQueue('kanji')
     if (kind === 'study') {
       return [...queue.learning.filter((c) => c.state === 'learning'), ...queue.fresh]
     }
@@ -77,7 +77,7 @@ export function useStudySession(kind: SessionKind): StudySession {
           newCards: p.newCards + (current.state === 'new' ? 1 : 0),
           reviewCards: p.reviewCards + (current.state === 'review' ? 1 : 0),
         }))
-        await answerCard(current.kanji, rating)
+        await answerCard(current.id, rating)
         const next = await loadQueue()
         setRevealed(false)
         if (next.length === 0) setStatus('done')
@@ -100,7 +100,7 @@ export function useStudySession(kind: SessionKind): StudySession {
       if (!current) return
       busy.current = true
       try {
-        await markIgnored(current.kanji, true)
+        await markIgnored(current.id, true)
         const next = await loadQueue()
         setRevealed(false)
         if (next.length === 0) setStatus('done')

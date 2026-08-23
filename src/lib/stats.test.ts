@@ -6,7 +6,7 @@ const NOW = new Date('2026-08-20T12:00:00Z').getTime()
 
 function log(overrides: Partial<ReviewLog>): ReviewLog {
   return {
-    kanji: '一',
+    cardId: 'k:一',
     rating: 'good',
     prevState: 'new',
     newState: 'review',

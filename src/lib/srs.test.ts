@@ -24,7 +24,7 @@ const rngMin = () => 0
 
 function reviewCard(overrides: Partial<SrsCard> = {}): SrsCard {
   const base: SrsCard = {
-    kanji: '一',
+    id: 'k:一',
     pos: 0,
     known: false,
     ignored: false,
@@ -41,9 +41,9 @@ function reviewCard(overrides: Partial<SrsCard> = {}): SrsCard {
 
 describe('createCard', () => {
   it('starts a card in the new state with Anki defaults', () => {
-    const c = createCard('一', 3, NOW)
+    const c = createCard('k:一', 3, NOW)
     expect(c).toEqual({
-      kanji: '一',
+      id: 'k:一',
       pos: 3,
       ignored: false,
       known: false,
@@ -61,7 +61,7 @@ describe('createCard', () => {
 
 describe('learning steps (new / learning)', () => {
   it('Again from a new card -> step 0 at 1 min, state learning', () => {
-    const c = rateCard(createCard('一', 0, NOW), 'again', NOW)
+    const c = rateCard(createCard('k:一', 0, NOW), 'again', NOW)
     expect(c.state).toBe('learning')
     expect(c.step).toBe(0)
     expect(c.due).toBe(NOW + LEARNING_STEPS_MIN[0] * MIN_MS)
@@ -69,21 +69,21 @@ describe('learning steps (new / learning)', () => {
   })
 
   it('first Good on a new card -> step 0 at 1 min (Anki moves new cards to the first step)', () => {
-    const c = rateCard(createCard('一', 0, NOW), 'good', NOW)
+    const c = rateCard(createCard('k:一', 0, NOW), 'good', NOW)
     expect(c.state).toBe('learning')
     expect(c.step).toBe(0)
     expect(c.due).toBe(NOW + LEARNING_STEPS_MIN[0] * MIN_MS)
   })
 
   it('Good advances step 0 -> step 1 at 10 min', () => {
-    const c = rateCard(createCard('一', 0, NOW), 'good', NOW)
+    const c = rateCard(createCard('k:一', 0, NOW), 'good', NOW)
     const next = rateCard(c, 'good', NOW + MIN_MS)
     expect(next.step).toBe(1)
     expect(next.due).toBe(NOW + MIN_MS + LEARNING_STEPS_MIN[1] * MIN_MS)
   })
 
   it('Good from the last step -> graduates to review at 1 day', () => {
-    let c = rateCard(createCard('一', 0, NOW), 'good', NOW)
+    let c = rateCard(createCard('k:一', 0, NOW), 'good', NOW)
     c = rateCard(c, 'good', NOW + MIN_MS)
     const graduated = rateCard(c, 'good', NOW + MIN_MS + 10 * MIN_MS)
     expect(graduated.state).toBe('review')
@@ -92,7 +92,7 @@ describe('learning steps (new / learning)', () => {
   })
 
   it('Easy -> graduates immediately to review at ~4 days (Anki Easy Interval)', () => {
-    const c = rateCard(createCard('一', 0, NOW), 'easy', NOW, rngMin)
+    const c = rateCard(createCard('k:一', 0, NOW), 'easy', NOW, rngMin)
     expect(c.state).toBe('review')
     expect(c.interval).toBe(EASY_INTERVAL_DAYS)
     expect(c.due).toBe(NOW + EASY_INTERVAL_DAYS * DAY_MS)
@@ -100,13 +100,13 @@ describe('learning steps (new / learning)', () => {
   })
 
   it('Hard from step 0 -> stays at step 0 (min 1 min)', () => {
-    const c = rateCard(createCard('一', 0, NOW), 'hard', NOW)
+    const c = rateCard(createCard('k:一', 0, NOW), 'hard', NOW)
     expect(c.step).toBe(0)
     expect(c.due).toBe(NOW + MIN_MS)
   })
 
   it('Hard from step 1 -> steps back to step 0 (1 min)', () => {
-    let c = rateCard(createCard('一', 0, NOW), 'good', NOW)
+    let c = rateCard(createCard('k:一', 0, NOW), 'good', NOW)
     c = rateCard(c, 'good', NOW + MIN_MS)
     const back = rateCard(c, 'hard', NOW + MIN_MS + MIN_MS)
     expect(back.step).toBe(0)
@@ -114,7 +114,7 @@ describe('learning steps (new / learning)', () => {
   })
 
   it('Again from step 1 -> back to step 0 (1 min)', () => {
-    let c = rateCard(createCard('一', 0, NOW), 'good', NOW)
+    let c = rateCard(createCard('k:一', 0, NOW), 'good', NOW)
     c = rateCard(c, 'good', NOW + MIN_MS)
     const back = rateCard(c, 'again', NOW + MIN_MS + MIN_MS)
     expect(back.step).toBe(0)
@@ -122,7 +122,7 @@ describe('learning steps (new / learning)', () => {
   })
 
   it('learning ratings never touch ease or lapses', () => {
-    let c = rateCard(createCard('一', 0, NOW), 'again', NOW)
+    let c = rateCard(createCard('k:一', 0, NOW), 'again', NOW)
     c = rateCard(c, 'good', NOW + MIN_MS)
     c = rateCard(c, 'hard', NOW + 2 * MIN_MS)
     c = rateCard(c, 'again', NOW + 3 * MIN_MS)
@@ -214,9 +214,9 @@ describe('relearning', () => {
 })
 
 describe('ratingOutcome', () => {
-  const newCard = createCard('一', 0, NOW)
-  const learnStep0 = rateCard(createCard('一', 0, NOW), 'again', NOW)
-  const learnStep1 = rateCard(rateCard(createCard('一', 0, NOW), 'good', NOW), 'good', NOW)
+  const newCard = createCard('k:一', 0, NOW)
+  const learnStep0 = rateCard(createCard('k:一', 0, NOW), 'again', NOW)
+  const learnStep1 = rateCard(rateCard(createCard('k:一', 0, NOW), 'good', NOW), 'good', NOW)
   const relearning = rateCard(reviewCard({ interval: 100 }), 'again', NOW)
   const review = reviewCard()
 
@@ -276,7 +276,7 @@ describe('fuzz', () => {
 
 describe('bookkeeping', () => {
   it('increments reps on every answer', () => {
-    let c = createCard('一', 0, NOW)
+    let c = createCard('k:一', 0, NOW)
     c = rateCard(c, 'good', NOW)
     expect(c.reps).toBe(1)
     c = rateCard(c, 'again', NOW + MIN_MS)
@@ -293,7 +293,7 @@ describe('bookkeeping', () => {
   })
 
   it('does not mutate the input card', () => {
-    const input = createCard('一', 0, NOW)
+    const input = createCard('k:一', 0, NOW)
     const before = { ...input }
     rateCard(input, 'easy', NOW, rngMin)
     expect(input).toEqual(before)

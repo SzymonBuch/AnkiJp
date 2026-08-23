@@ -10,7 +10,7 @@ import {
   type QuizConfig,
   type QuizQuestion,
 } from './quiz'
-import { createCard, DAY_MS, STARTING_EASE, type SrsCard } from './srs'
+import { bareId, cardId, createCard, DAY_MS, STARTING_EASE, type SrsCard } from './srs'
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0
@@ -128,7 +128,7 @@ describe('selectQuizTargets', () => {
   const NOW = new Date('2026-08-20T12:00:00Z').getTime()
 
   function cardFor(entry: KanjiEntry, over: Partial<SrsCard> = {}): SrsCard {
-    return { ...createCard(entry.kanji, KANJI_DATA.indexOf(entry), NOW), ...over }
+    return { ...createCard(cardId('kanji', entry.kanji), KANJI_DATA.indexOf(entry), NOW), ...over }
   }
 
   function makePools() {
@@ -189,7 +189,7 @@ describe('selectQuizTargets', () => {
     const targets = selectQuizTargets(config, pools, { now: NOW }, mulberry32(5))
     expect(targets).toHaveLength(7)
     expect(new Set(targets.map((t) => t.kanji)).size).toBe(7)
-    const newKanji = new Set(pools.new.map((c) => c.kanji))
+    const newKanji = new Set(pools.new.map((c) => bareId(c.id)))
     for (const target of targets.slice(3)) expect(newKanji.has(target.kanji)).toBe(true)
   })
 
@@ -222,7 +222,7 @@ describe('selectQuizTargets', () => {
       dueOnly: true,
     }
     const targets = selectQuizTargets(config, pools, { now: NOW }, mulberry32(2))
-    expect(targets.map((t) => t.kanji)).toEqual([pools.known[0].kanji])
+    expect(targets.map((t) => t.kanji)).toEqual([bareId(pools.known[0].id)])
   })
 
   it('problematicOnly keeps only lapsed or low-ease cards', () => {
@@ -238,7 +238,7 @@ describe('selectQuizTargets', () => {
     }
     const targets = selectQuizTargets(config, pools, { now: NOW }, mulberry32(4))
     expect(targets.map((t) => t.kanji).sort()).toEqual(
-      [pools.known[0].kanji, pools.known[1].kanji].sort(),
+      [bareId(pools.known[0].id), bareId(pools.known[1].id)].sort(),
     )
   })
 

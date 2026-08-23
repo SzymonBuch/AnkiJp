@@ -12,7 +12,7 @@ import {
   putDrawing,
   type Settings,
 } from '../lib/db'
-import { DAY_MS, type SrsCard } from '../lib/srs'
+import { DAY_MS, bareId, type SrsCard } from '../lib/srs'
 import { getKanji } from '../lib/kanji'
 
 type Filter = 'all' | 'new' | 'learning' | 'due' | 'known' | 'ignored'
@@ -62,7 +62,7 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
         if (cancelled) return
         setCards(cardData)
         setSettings(settingsData)
-        setDrawings(Object.fromEntries(drawingData.map((d) => [d.kanji, d.dataUrl])))
+        setDrawings(Object.fromEntries(drawingData.map((d) => [d.id, d.dataUrl])))
         setNow(Date.now())
       },
     )
@@ -84,9 +84,10 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
     return rows.filter((row) => {
       if (filter !== 'all' && row.status !== filter) return false
       if (!needle) return true
-      const entry = getKanji(row.card.kanji)
+      const glyph = bareId(row.card.id)
+      const entry = getKanji(glyph)
       return (
-        row.card.kanji.includes(needle) ||
+        glyph.includes(needle) ||
         entry.meaning.toLowerCase().includes(needle) ||
         entry.kun.some((k) => k.toLowerCase().includes(needle)) ||
         entry.on.some((o) => o.toLowerCase().includes(needle))
@@ -95,34 +96,34 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
   }, [rows, filter, query])
 
   const toggleCard = async (
-    kanji: string,
-    mutate: (kanji: string) => Promise<SrsCard | undefined>,
+    id: string,
+    mutate: (id: string) => Promise<SrsCard | undefined>,
   ) => {
-    await mutate(kanji)
-    const updated = (await getCard(kanji)) ?? null
+    await mutate(id)
+    const updated = (await getCard(id)) ?? null
     setSelected(updated)
-    setCards((prev) => prev.map((c) => (c.kanji === kanji ? (updated ?? c) : c)))
+    setCards((prev) => prev.map((c) => (c.id === id ? (updated ?? c) : c)))
   }
 
-  const toggleKnown = (kanji: string, known: boolean) =>
-    toggleCard(kanji, (k) => markKnown(k, known))
+  const toggleKnown = (id: string, known: boolean) =>
+    toggleCard(id, (cardId) => markKnown(cardId, known))
 
-  const toggleIgnored = (kanji: string, ignored: boolean) =>
-    toggleCard(kanji, (k) => markIgnored(k, ignored))
+  const toggleIgnored = (id: string, ignored: boolean) =>
+    toggleCard(id, (cardId) => markIgnored(cardId, ignored))
 
   const saveDrawing = async (dataUrl: string) => {
     if (!selected) return
-    await putDrawing({ kanji: selected.kanji, dataUrl, updatedAt: Date.now() })
-    setDrawings((prev) => ({ ...prev, [selected.kanji]: dataUrl }))
+    await putDrawing({ id: selected.id, dataUrl, updatedAt: Date.now() })
+    setDrawings((prev) => ({ ...prev, [selected.id]: dataUrl }))
     setPadOpen(false)
   }
 
   const removeDrawing = async () => {
     if (!selected) return
-    await deleteDrawing(selected.kanji)
+    await deleteDrawing(selected.id)
     setDrawings((prev) => {
       const next = { ...prev }
-      delete next[selected.kanji]
+      delete next[selected.id]
       return next
     })
   }
@@ -184,13 +185,13 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
           <div className="grid grid-cols-5 gap-2 sm:grid-cols-7 md:grid-cols-10 lg:grid-cols-12">
             {visible.map(({ card, status }) => (
               <button
-                key={card.kanji}
+                key={card.id}
                 type="button"
                 onClick={() => setSelected(card)}
-                aria-label={`${card.kanji} — ${status}`}
+                aria-label={`${bareId(card.id)} — ${status}`}
                 className={`flex aspect-square min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-2xl font-semibold shadow-sm transition active:scale-90 sm:text-3xl dark:border-slate-700 dark:bg-slate-900 ${CELL_COLOR[status]}`}
               >
-                {card.kanji}
+                {bareId(card.id)}
               </button>
             ))}
           </div>
@@ -199,12 +200,12 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
 
       {selected && settings && (
         <KanjiDetail
-          entry={getKanji(selected.kanji)}
+          entry={getKanji(bareId(selected.id))}
           card={selected}
           settings={settings}
-          drawing={drawings[selected.kanji] ?? null}
-          onToggleKnown={(known) => toggleKnown(selected.kanji, known)}
-          onToggleIgnored={(ignored) => toggleIgnored(selected.kanji, ignored)}
+          drawing={drawings[selected.id] ?? null}
+          onToggleKnown={(known) => toggleKnown(selected.id, known)}
+          onToggleIgnored={(ignored) => toggleIgnored(selected.id, ignored)}
           onDraw={() => setPadOpen(true)}
           onDeleteDrawing={removeDrawing}
           onClose={() => setSelected(null)}
@@ -213,8 +214,8 @@ export function DeckScreen({ onExit }: DeckScreenProps) {
 
       {selected && padOpen && (
         <DrawingPad
-          kanji={selected.kanji}
-          initial={drawings[selected.kanji] ?? null}
+          kanji={bareId(selected.id)}
+          initial={drawings[selected.id] ?? null}
           onSave={saveDrawing}
           onClose={() => setPadOpen(false)}
         />
