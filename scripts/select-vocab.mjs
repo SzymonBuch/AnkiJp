@@ -79,6 +79,7 @@ async function main() {
 
   const words = [];
   const seenTerms = new Set();
+  const furiganaFailures = [];
   const stats = {
     scannedRows: 0,
     skippedDuplicate: 0,
@@ -86,7 +87,6 @@ async function main() {
     skippedParticle: 0,
     skippedInflected: 0,
     unmatchedJmdict: 0,
-    furiganaFallback: 0,
     spellingFallback: 0,
     tagFallback: 0,
     commonFallback: 0,
@@ -137,12 +137,13 @@ async function main() {
     if (chosen.resolution.commonFallback) stats.commonFallback += 1;
     if (chosen.resolution.headwordFallback) stats.headwordFallback += 1;
 
-    let furiganaHtml = alignFurigana(row.term, row.reading);
+    // Mechanical alignment or nothing: whole-word ruby would teach the user a
+    // wrong reading, and data:verify rejects it anyway. Fail with the full
+    // list so the terms can be handled deliberately.
+    const furiganaHtml = alignFurigana(row.term, row.reading);
     if (furiganaHtml === null) {
-      furiganaHtml = analyzeForm(tokenizer, row.term).tokens.length
-        ? fallbackWholeWordRuby(row.term, row.reading)
-        : row.term;
-      stats.furiganaFallback += 1;
+      furiganaFailures.push(`${row.term} (${row.reading})`);
+      continue;
     }
 
     const kanji = [...new Set([...row.term].filter((ch) => KANJI_CHAR_RE.test(ch)))];
@@ -157,6 +158,14 @@ async function main() {
       meanings: allMeanings(chosen.entry),
       kanji,
     });
+  }
+
+  if (furiganaFailures.length) {
+    throw new Error(
+      `furigana alignment failed for ${furiganaFailures.length} term(s): ` +
+        `${furiganaFailures.join(", ")} — no automatic repair exists; exclude the ` +
+        "terms from the ranking or resolve them via vocab-overrides.json",
+    );
   }
 
   if (words.length < TARGET_COUNT) {
@@ -183,11 +192,6 @@ async function main() {
   console.log(`\nSelected ${words.length} words (scanned ${stats.scannedRows} ranking rows).`);
   console.log(JSON.stringify(stats, null, 2));
   console.log(`Wrote ${VOCAB_SELECTION_PATH}`);
-}
-
-/** Whole-word ruby when mechanical alignment fails (rare; verify flags these). */
-function fallbackWholeWordRuby(term, reading) {
-  return `<ruby>${term}<rt>${reading}</rt></ruby>`;
 }
 
 try {

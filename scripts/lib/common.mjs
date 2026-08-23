@@ -191,9 +191,10 @@ export async function mapLimit(items, limit, fn) {
 export function createRateLimiter(minGapMs) {
   let last = 0;
   return async function beforeRequest() {
+    // Reserve the slot synchronously — setting `last` after the sleep lets
+    // concurrent workers observe a stale value and burst together.
     const now = Date.now();
-    const wait = Math.max(0, last + minGapMs - now);
-    if (wait > 0) await sleep(wait);
-    last = Date.now();
+    last = Math.max(last + minGapMs, now);
+    await sleep(last - now);
   };
 }

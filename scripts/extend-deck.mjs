@@ -44,20 +44,27 @@ async function main() {
   }
 
   const knownGlyphs = new Set(deck.map((d) => d.kanji));
-  const extensionGlyphs = [...wordCount.keys()].filter((g) => !knownGlyphs.has(g));
-  console.log(
-    `extension: ${extensionGlyphs.length} new kanji ` +
-      `(vocab uses ${wordCount.size} unique, deck has ${knownGlyphs.size})`,
-  );
-  if (!extensionGlyphs.length) {
-    console.log("Deck already covers every vocabulary kanji — nothing to do.");
-    return;
-  }
 
-  // Readings/meanings/stroke counts from kanjiapi.dev (same source as the
-  // kyōiku base), resumable per glyph.
+  // extensions.json is an accumulating snapshot of the whole grade-0 tail,
+  // not a single-batch artifact: seed the universe from what is already
+  // committed so a fresh clone reproduces it without refetching, then add
+  // vocabulary glyphs missing from the deck.
+  const previous = readJsonFile(EXTENSIONS_PATH, null);
+  const tailByGlyph = new Map(deck.filter((d) => d.grade === 0).map((d) => [d.kanji, d]));
+  const prevByGlyph = new Map((previous?.records ?? []).map((r) => [r.kanji, r]));
+  const universe = new Set([...wordCount.keys()].filter((g) => !knownGlyphs.has(g)));
+  for (const g of tailByGlyph.keys()) universe.add(g);
+  const pendingGlyphs = [...universe].filter((g) => !tailByGlyph.has(g) && !prevByGlyph.has(g));
+  console.log(
+    `extension: ${pendingGlyphs.length} new kanji to fetch ` +
+      `(vocab uses ${wordCount.size} unique, deck has ${knownGlyphs.size}, ` +
+      `grade-0 tail carries ${tailByGlyph.size})`,
+  );
+
+  // Readings/meanings from kanjiapi.dev (same source as the kyōiku base),
+  // resumable per glyph. Failures are NOT cached — the next run retries them.
   const apiCache = readJsonFile(EXTENSION_API_CACHE_PATH, {});
-  const apiPending = extensionGlyphs.filter((g) => !(g in apiCache));
+  const apiPending = pendingGlyphs.filter((g) => !(g in apiCache));
   if (apiPending.length) {
     console.log(`Fetching ${apiPending.length} kanji details from kanjiapi.dev...`);
   }
@@ -77,7 +84,6 @@ async function main() {
         unicode: d.unicode ?? null,
       };
     } catch (err) {
-      apiCache[glyph] = null;
       problems.push(`${glyph}: kanjiapi.dev ${err.message}`);
     }
     apiDone += 1;
@@ -88,10 +94,11 @@ async function main() {
   });
 
   // jpdb content (keyword/radicals/mnemonic/examples) via the shared scraper
-  // and page cache; failures land in problems like everywhere else.
+  // and page cache; failures land in problems like everywhere else. Only the
+  // newly fetched glyphs need scraping — reused records carry their content.
   const scraped = readJsonFile(JPDB_SCRAPE_PATH, {});
   problems.push(
-    ...(await scrapeMissing(extensionGlyphs, scraped, {
+    ...(await scrapeMissing(pendingGlyphs, scraped, {
       label: "for the grade-0 extension",
       onSave: () => writeJsonFile(JPDB_SCRAPE_PATH, scraped),
     })),
@@ -101,38 +108,46 @@ async function main() {
   // Tatoeba fallback for glyphs whose jpdb examples fall short of two
   // sentences. Inline here so applied records are final; the corpus download
   // only happens when this is actually needed.
-  const tokenizer = await loadTokenizer();
-  const needingFallback = extensionGlyphs.filter(
+  const needingFallback = pendingGlyphs.filter(
     (g) => (scraped[g]?.sentences ?? []).length < 2,
   );
   let fallbacks = {};
   if (needingFallback.length) {
     console.log(`${needingFallback.length} extension kanji need tatoeba fallback sentences`);
+    const tokenizer = await loadTokenizer();
     fallbacks = await buildKanjiFallbacks(needingFallback, tokenizer);
   }
 
-  const missingApi = extensionGlyphs.filter((g) => apiCache[g] === null);
+  const missingApi = pendingGlyphs.filter((g) => !(g in apiCache));
   if (missingApi.length) {
     throw new Error(
       `no kanjiapi.dev data for ${missingApi.length} glyph(s): ${missingApi.join(", ")} — ` +
-        "cannot build readings/meanings; extend the source or drop these words",
+        "they were not cached this run; fix connectivity and rerun to retry them",
     );
   }
 
-  const records = extensionGlyphs.map((glyph) => {
-    const api = apiCache[glyph];
-    return buildKanjiRecord({
-      kyoikuEntry: {
-        kanji: glyph,
-        grade: 0,
-        on: api.on,
-        kun: api.kun,
-        meanings: api.meanings.length ? api.meanings : ["?"],
-      },
-      scrapeEntry: scraped[glyph],
-      tatoebaSentences: fallbacks[glyph] ?? [],
-    });
-  });
+  const fetchedRecords = new Map(
+    pendingGlyphs.map((glyph) => [
+      glyph,
+      buildKanjiRecord({
+        kyoikuEntry: {
+          kanji: glyph,
+          grade: 0,
+          on: apiCache[glyph].on,
+          kun: apiCache[glyph].kun,
+          meanings: apiCache[glyph].meanings.length ? apiCache[glyph].meanings : ["?"],
+        },
+        scrapeEntry: scraped[glyph],
+        tatoebaSentences: fallbacks[glyph] ?? [],
+      }),
+    ]),
+  );
+
+  // Reuse committed tail records first (they are the shipped truth), then any
+  // previously generated ones, and only then freshly built records.
+  const records = [...universe]
+    .map((glyph) => tailByGlyph.get(glyph) ?? prevByGlyph.get(glyph) ?? fetchedRecords.get(glyph))
+    .filter(Boolean);
   records.sort(
     (a, b) =>
       (wordCount.get(b.kanji) ?? 0) - (wordCount.get(a.kanji) ?? 0) ||
@@ -144,20 +159,22 @@ async function main() {
     meta: {
       generatedFrom: "vocab-selection.json + kanjiapi.dev + jpdb.io scrape",
       usefulness: Object.fromEntries(
-        records.map((r) => [r.kanji, wordCount.get(r.kanji)]),
+        records.map((r) => [r.kanji, wordCount.get(r.kanji) ?? 0]),
       ),
     },
     records,
   };
   writeJsonFile(EXTENSIONS_PATH, extensions);
 
-  // Apply: append to the committed deck (kyōiku block untouched). Reruns are
-  // a no-op once every glyph is present.
-  const merged = [...deck];
-  for (const record of records) merged.push(record);
+  // Apply: rebuild the committed deck as the untouched kyōiku block followed
+  // by the full extension set — reruns converge to the same output instead of
+  // appending duplicates or dropping earlier batches.
+  const merged = [...deck.filter((d) => d.grade !== 0), ...records];
   writeJsonFile(KANJI_DATA_PATH, merged, true);
 
-  console.log(`\nApplied ${records.length} grade-0 kanji to ${KANJI_DATA_PATH}`);
+  console.log(
+    `\nApplied ${records.length} grade-0 kanji (${pendingGlyphs.length} newly built) to ${KANJI_DATA_PATH}`,
+  );
   console.log(`deck size now: ${merged.length}`);
   if (problems.length) {
     console.warn(`\n${problems.length} problem(s):`);

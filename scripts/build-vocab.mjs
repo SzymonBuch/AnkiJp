@@ -18,7 +18,13 @@ function main() {
   if (!selection?.words?.length) {
     throw new Error("vocab-selection.json missing — run select-vocab.mjs first.");
   }
-  const sentencesByWord = readJsonFile(TATOEBA_VOCAB_SENTENCES_PATH, {});
+  const sentencesByWord = readJsonFile(TATOEBA_VOCAB_SENTENCES_PATH, null);
+  if (!sentencesByWord) {
+    throw new Error(
+      "tatoeba-vocab-sentences.json missing — run fetch-tatoeba.mjs first. " +
+        "Building without it would silently ship cards with zero example sentences.",
+    );
+  }
 
   const vocab = selection.words.map((w) => ({
     id: w.id,
@@ -34,6 +40,13 @@ function main() {
   writeJsonFile(VOCAB_DATA_PATH, vocab, true);
 
   const counts = vocab.map((v) => v.sentences.length);
+  const withoutSentences = counts.filter((c) => c === 0).length;
+  if (withoutSentences / vocab.length > 0.1) {
+    console.warn(
+      `${withoutSentences}/${vocab.length} words have no example sentences — ` +
+        "check the tatoeba step output before shipping",
+    );
+  }
   console.log(`Wrote ${vocab.length} words to ${VOCAB_DATA_PATH}`);
   console.log(
     JSON.stringify({

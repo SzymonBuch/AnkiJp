@@ -42,10 +42,21 @@ async function main() {
 
   // Grade-0 extension records are built by extend-deck.mjs and appended after
   // the kyōiku block in usefulness order (decisions #8, #15, #18). The file
-  // already stores them sorted; keep that order verbatim.
+  // already stores them sorted; keep that order verbatim. A missing extensions
+  // file must never silently shrink a deck that already carries the extension.
   if (extensions?.records?.length) {
     data.push(...extensions.records);
     console.log(`Appended ${extensions.records.length} grade-0 extension kanji.`);
+  } else {
+    const current = readJsonFile(KANJI_DATA_PATH, []);
+    const tail = current.filter((e) => e.grade === 0);
+    if (tail.length) {
+      throw new Error(
+        `kanji.json currently carries ${tail.length} grade-0 extension kanji, but ` +
+          `${path.basename(EXTENSIONS_PATH)} is missing or empty — run extend-deck.mjs ` +
+          "first (refusing to wipe the extension by rebuilding kyōiku-only data).",
+      );
+    }
   }
 
   fs.mkdirSync(path.dirname(KANJI_DATA_PATH), { recursive: true });
