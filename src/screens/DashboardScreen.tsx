@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import { getLogs, getSummary, type Summary } from '../lib/db'
-import type { Screen } from '../lib/nav'
-import type { ContentType } from '../lib/srs'
+import { getAllCards, getLogs, getSummary, type Summary } from '../lib/db'
+import type { DeckFocus, Screen } from '../lib/nav'
+import { bareId, typeOf, type ContentType } from '../lib/srs'
 import type { SessionType } from '../lib/mixed'
+import { buildGateContext, isKanjiUnlocked, lockedVocabRows } from '../lib/gating'
+import { getKanji } from '../lib/kanji'
 import { computeStats } from '../lib/stats'
 
 interface DashboardScreenProps {
-  onNavigate: (screen: Screen, type?: SessionType) => void
+  onNavigate: (screen: Screen, type?: SessionType, focus?: DeckFocus | null) => void
 }
 
 /** Content types with single-type study/review/quiz sessions, topological order. */
@@ -27,6 +29,7 @@ const SUMMARY_LABELS: Record<(typeof SUMMARY_KEYS)[number], string> = {
 export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
   const [summaries, setSummaries] = useState<Record<ContentType, Summary> | null>(null)
   const [streak, setStreak] = useState(0)
+  const [gate, setGate] = useState<{ blocked: number; locked: number } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -37,10 +40,23 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       getSummary('kanji'),
       getSummary('vocab'),
       getLogs(),
-    ]).then(([radical, kanji, vocab, logs]) => {
+      getAllCards(),
+    ]).then(([radical, kanji, vocab, logs, cards]) => {
       if (cancelled) return
       setSummaries({ radical, kanji, vocab })
       setStreak(computeStats(logs).currentStreak)
+      // Gating snapshot (#3): what the learner is still locked out of —
+      // surfaced here so the next productive step stays one tap away.
+      if (cards.length === 0) return
+      const ctx = buildGateContext(cards)
+      const blocked = cards.filter(
+        (card) =>
+          typeOf(card.id) === 'kanji' &&
+          !card.ignored &&
+          card.state === 'new' &&
+          !isKanjiUnlocked(getKanji(bareId(card.id)), ctx),
+      ).length
+      setGate({ blocked, locked: lockedVocabRows(cards).length })
     })
     return () => {
       cancelled = true
@@ -62,6 +78,13 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       {summaries && (
         <div className="flex w-full max-w-sm flex-col gap-2" data-testid="dashboard-counters">
           <CounterTable summaries={summaries} />
+          {gate && gate.blocked + gate.locked > 0 && (
+            <GateCard
+              blocked={gate.blocked}
+              locked={gate.locked}
+              onOpen={() => onNavigate('deck', 'mixed', gate.blocked > 0 ? 'blocked' : 'locked')}
+            />
+          )}
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <div className="text-center text-sm tabular-nums">
               <span className="font-bold text-green-700 dark:text-green-400" data-testid="dashboard-streak">
@@ -253,6 +276,36 @@ const SUMMARY_ACCENTS: Record<(typeof SUMMARY_KEYS)[number], string> = {
   learning: 'text-amber-600 dark:text-amber-400',
   due: 'text-red-600 dark:text-red-400',
   future: 'text-blue-600 dark:text-blue-400',
+}
+
+/**
+ * Locked-progress summary (Etap 2): kanji gated by unstudied components plus
+ * words queued behind their kanji. Tapping it opens the matching Deck
+ * drill-down with each entry's missing components and queue positions.
+ */
+function GateCard({
+  blocked,
+  locked,
+  onOpen,
+}: {
+  blocked: number
+  locked: number
+  onOpen: () => void
+}) {
+  const parts = [blocked > 0 ? `${blocked} blocked kanji` : '', locked > 0 ? `${locked} words waiting` : ''].filter(
+    Boolean,
+  )
+  return (
+    <button
+      type="button"
+      data-testid="dashboard-gate"
+      onClick={onOpen}
+      className="flex min-h-11 items-center justify-between rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-left shadow-sm transition active:scale-[0.98] dark:border-amber-800 dark:bg-amber-950/40"
+    >
+      <span className="text-sm font-medium text-amber-800 dark:text-amber-300">{parts.join(' · ')}</span>
+      <span className="text-xs text-amber-600 dark:text-amber-400">see what unlocks them →</span>
+    </button>
+  )
 }
 
 function Attribution() {

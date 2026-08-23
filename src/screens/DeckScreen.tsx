@@ -17,6 +17,7 @@ import {
 } from '../lib/db'
 import { buildGateContext, isKanjiUnlocked, lockedVocabRows, missingComponents, type LockedVocabRow } from '../lib/gating'
 import { getKanji } from '../lib/kanji'
+import type { DeckFocus } from '../lib/nav'
 import { DAY_MS, bareId, cardId, typeOf, type ContentType, type SrsCard } from '../lib/srs'
 import { getRadical } from '../lib/radicals'
 import { getVocab } from '../lib/vocab'
@@ -37,6 +38,8 @@ interface BlockedRow {
 
 interface DeckScreenProps {
   onExit: () => void
+  /** Deep-link from the dashboard: land with the gating drill-down open. */
+  focus?: DeckFocus | null
 }
 
 /** Vocab joins as its own tab in its own stage. */
@@ -67,18 +70,18 @@ const CELL_COLOR: Record<CardStatus, string> = {
   ignored: 'text-slate-500 dark:text-slate-400',
 }
 
-export function DeckScreen({ onExit }: DeckScreenProps) {
+export function DeckScreen({ onExit, focus = null }: DeckScreenProps) {
   const [cards, setCards] = useState<SrsCard[]>([])
   const [settings, setSettings] = useState<Settings | null>(null)
-  const [tab, setTab] = useState<ContentType>('kanji')
+  const [tab, setTab] = useState<ContentType>(focus === 'locked' ? 'vocab' : 'kanji')
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<SrsCard | null>(null)
   const [drawings, setDrawings] = useState<Record<string, string>>({})
   const [padOpen, setPadOpen] = useState(false)
   const [now, setNow] = useState(0)
-  const [showBlocked, setShowBlocked] = useState(false)
-  const [showLocked, setShowLocked] = useState(false)
+  const [showBlocked, setShowBlocked] = useState(focus === 'blocked')
+  const [showLocked, setShowLocked] = useState(focus === 'locked')
 
   useEffect(() => {
     let cancelled = false
