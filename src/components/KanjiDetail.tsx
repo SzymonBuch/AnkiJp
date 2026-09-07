@@ -2,7 +2,9 @@ import type { ReactNode } from 'react'
 import type { Settings } from '../lib/db'
 import type { KanjiEntry } from '../lib/kanji'
 import type { SrsCard } from '../lib/srs'
+import { jpdbKanjiUrl } from '../lib/externalLinks'
 import { Furigana } from './Furigana'
+import { JpdbLink } from './JpdbLink'
 
 export interface KanjiDetailProps {
   entry: KanjiEntry
@@ -76,6 +78,9 @@ export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onT
               <div className="text-xl font-semibold text-slate-900 dark:text-slate-100">{entry.meaning}</div>
               <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                 {[entry.on.join(', '), entry.kun.join(', ')].filter(Boolean).join(' ・ ')}
+              </div>
+              <div className="mt-3">
+                <JpdbLink href={jpdbKanjiUrl(entry.kanji)} ariaLabel={`Open ${entry.kanji} in jpdb`} />
               </div>
               <div className="mt-1 text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Grade {entry.grade}

@@ -2,7 +2,9 @@ import type { ReactNode } from 'react'
 import type { Settings } from '../lib/db'
 import { getKanjiUsing, type RadicalEntry } from '../lib/radicals'
 import type { SrsCard } from '../lib/srs'
+import { jpdbKanjiUrl } from '../lib/externalLinks'
 import { RadicalGlyph } from './RadicalGlyph'
+import { JpdbLink } from './JpdbLink'
 
 export interface RadicalDetailProps {
   entry: RadicalEntry
@@ -62,6 +64,9 @@ export function RadicalDetail({ entry, card, settings, onToggleKnown, onSelectKa
               <div className="text-xl font-semibold text-slate-900 dark:text-slate-100">{entry.keyword}</div>
               <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                 Used in {usedIn.length} kanji · #{card.pos + 1} in study order
+              </div>
+              <div className="mt-3">
+                <JpdbLink href={jpdbKanjiUrl(entry.glyph)} ariaLabel={`Open ${entry.glyph} in jpdb`} />
               </div>
             </div>
           </div>

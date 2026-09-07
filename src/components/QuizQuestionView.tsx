@@ -1,5 +1,7 @@
 import type { QuestionMode, QuizQuestion } from '../lib/quiz'
+import { jpdbKanjiUrl, jpdbVocabSearchUrl } from '../lib/externalLinks'
 import { Furigana } from './Furigana'
+import { JpdbLink } from './JpdbLink'
 import { TypeBadge } from './TypeBadge'
 
 interface QuizQuestionViewProps {
@@ -136,6 +138,12 @@ export function QuizQuestionView({
               {question.sentenceEn}
             </p>
           )}
+          <JpdbLink
+            href={question.kind === 'vocab'
+              ? jpdbVocabSearchUrl(question.vocabId)
+              : jpdbKanjiUrl(question.kind === 'radical' ? question.glyph : question.kanji)}
+            ariaLabel={`Open ${question.kind === 'vocab' ? question.vocabId : question.kind === 'radical' ? question.glyph : question.kanji} in jpdb`}
+          />
           <button
             type="button"
             onClick={onNext}

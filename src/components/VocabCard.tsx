@@ -1,6 +1,8 @@
 import type { VocabEntry } from '../lib/vocab'
 import type { Rating, SrsCard } from '../lib/srs'
+import { jpdbVocabSearchUrl } from '../lib/externalLinks'
 import { Furigana } from './Furigana'
+import { JpdbLink } from './JpdbLink'
 import { RatingButtons } from './RatingButtons'
 import { TypeBadge } from './TypeBadge'
 
@@ -66,6 +68,9 @@ export function VocabCard({
             {entry.meaning}
           </div>
           <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">{entry.reading}</div>
+          <div className="mt-3">
+            <JpdbLink href={jpdbVocabSearchUrl(entry.id)} ariaLabel={`Open ${entry.id} in jpdb`} />
+          </div>
         </div>
       </div>
 

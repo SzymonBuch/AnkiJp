@@ -2,7 +2,9 @@ import type { ReactNode } from 'react'
 import type { Settings } from '../lib/db'
 import type { VocabEntry } from '../lib/vocab'
 import type { SrsCard } from '../lib/srs'
+import { jpdbVocabSearchUrl } from '../lib/externalLinks'
 import { Furigana } from './Furigana'
+import { JpdbLink } from './JpdbLink'
 
 export interface VocabDetailProps {
   entry: VocabEntry
@@ -86,6 +88,9 @@ export function VocabDetail({
                 {entry.meaning}
               </div>
               <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">{entry.reading}</div>
+              <div className="mt-3">
+                <JpdbLink href={jpdbVocabSearchUrl(entry.id)} ariaLabel={`Open ${entry.id} in jpdb`} />
+              </div>
               <div className="mt-1 text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 #{card.pos + 1} in top-2000
               </div>

@@ -1,6 +1,8 @@
 import type { KanjiEntry } from '../lib/kanji'
 import type { Rating, SrsCard } from '../lib/srs'
+import { jpdbKanjiUrl } from '../lib/externalLinks'
 import { Furigana } from './Furigana'
+import { JpdbLink } from './JpdbLink'
 import { RatingButtons } from './RatingButtons'
 import { TypeBadge } from './TypeBadge'
 
@@ -51,6 +53,9 @@ export function StudyCard({ entry, card, revealed, drawing, onReveal, onRate, on
           <div className="text-xl font-semibold text-slate-900 dark:text-slate-100">{entry.meaning}</div>
           <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             {[entry.on.join(', '), entry.kun.join(', ')].filter(Boolean).join(' ・ ')}
+          </div>
+          <div className="mt-3">
+            <JpdbLink href={jpdbKanjiUrl(entry.kanji)} ariaLabel={`Open ${entry.kanji} in jpdb`} />
           </div>
         </div>
       </div>

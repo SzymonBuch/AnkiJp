@@ -1,7 +1,9 @@
 import type { RadicalEntry } from '../lib/radicals'
 import { getKanjiUsing } from '../lib/radicals'
 import type { Rating, SrsCard } from '../lib/srs'
+import { jpdbKanjiUrl } from '../lib/externalLinks'
 import { RadicalGlyph } from './RadicalGlyph'
+import { JpdbLink } from './JpdbLink'
 import { RatingButtons } from './RatingButtons'
 import { TypeBadge } from './TypeBadge'
 
@@ -52,6 +54,9 @@ export function RadicalCard({ entry, card, revealed, onReveal, onRate, onSelectK
           <div className="text-2xl font-semibold text-slate-900 dark:text-slate-100">{entry.keyword}</div>
           <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             Used in {usedIn.length} kanji
+          </div>
+          <div className="mt-3">
+            <JpdbLink href={jpdbKanjiUrl(entry.glyph)} ariaLabel={`Open ${entry.glyph} in jpdb`} />
           </div>
         </div>
       </div>
