@@ -1,6 +1,6 @@
 import type { ReviewLog } from './db'
 import { getKanji } from './kanji'
-import { getKanjiUsing } from './radicals'
+import { getKanjiUsing, getRadicalDependencies } from './radicals'
 import { bareId, cardId, typeOf, type ContentType, type SrsCard } from './srs'
 import { getVocab, type VocabEntry } from './vocab'
 
@@ -40,14 +40,15 @@ function seenAt(id: string, intro: IntroductionTimes): number {
  * it count as a component (`componentsOfSeenKanji`). 0 when never introduced.
  */
 function componentIntroducedAt(component: string, intro: IntroductionTimes): number {
-  let time = Math.max(
-    seenAt(cardId('radical', component), intro),
-    seenAt(cardId('kanji', component), intro),
-  )
+  let time = Math.max(seenAt(cardId('radical', component), intro), seenAt(cardId('kanji', component), intro))
   for (const host of getKanjiUsing(component)) {
     time = Math.max(time, seenAt(cardId('kanji', host.kanji), intro))
   }
   return time
+}
+
+function radicalComponentIntroducedAt(component: string, intro: IntroductionTimes): number {
+  return Math.max(seenAt(cardId('radical', component), intro), seenAt(cardId('kanji', component), intro))
 }
 
 function kanjiIntroducedAt(glyph: string, intro: IntroductionTimes): number {
@@ -70,14 +71,17 @@ function vocabIntroducedAt(entry: VocabEntry, intro: IntroductionTimes): number 
 
 /**
  * When the card became introducible: the newest introduction among the facts
- * that gate it. Radicals depend on nothing; a kanji waits for its components;
- * a word waits for its kanji. 0 covers "unlocked from the start" (pure-kana
- * words) and unlocks granted without a log entry (migration rule B).
+ * that gate it. A radical waits for its direct components, a kanji waits for
+ * its components, and a word waits for its kanji. 0 covers "unlocked from the
+ * start" (roots and pure-kana words) and unlocks granted without a log entry.
  */
 export function introducedAt(card: SrsCard, intro: IntroductionTimes): number {
   switch (typeOf(card.id)) {
     case 'radical':
-      return 0
+      return Math.max(
+        ...getRadicalDependencies(bareId(card.id)).map((component) => radicalComponentIntroducedAt(component, intro)),
+        0,
+      )
     case 'kanji':
       return kanjiIntroducedAt(bareId(card.id), intro)
     case 'vocab':

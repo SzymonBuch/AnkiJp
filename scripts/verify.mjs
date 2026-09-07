@@ -169,6 +169,13 @@ async function verifyRadicals(data, failures) {
     const r = radicals[i];
     if (!isNonEmptyString(r.glyph)) fail(failures, "radical without glyph", `radicals[${i}]`);
     if (!isNonEmptyString(r.keyword)) fail(failures, `radical ${r.glyph} without keyword`, r.glyph);
+    if (!Number.isInteger(r.usedIn) || r.usedIn < 1) fail(failures, "invalid usedIn count", r.glyph);
+    if (r.mnemonicSource !== "jpdb" && r.mnemonicSource !== "ai") {
+      fail(failures, `invalid radical mnemonicSource ${r.mnemonicSource}`, r.glyph);
+    }
+    if (r.mnemonicSource === "jpdb" && !isNonEmptyString(r.mnemonic)) {
+      fail(failures, 'radical mnemonicSource "jpdb" but mnemonic is empty', r.glyph);
+    }
     if (byGlyph.has(r.glyph)) fail(failures, "duplicate radical glyph", r.glyph);
     byGlyph.set(r.glyph, r);
   }
@@ -189,6 +196,41 @@ async function verifyRadicals(data, failures) {
       if (!firstAppearance.has(r.glyph)) firstAppearance.set(r.glyph, firstAppearance.size);
     }
   }
+
+  for (const radical of radicals) {
+    if (radical.usedIn !== (usedIn.get(radical.glyph) ?? 0)) {
+      fail(failures, `usedIn ${radical.usedIn} does not match component count ${usedIn.get(radical.glyph) ?? 0}`, radical.glyph);
+    }
+  }
+
+  const dependencies = new Map();
+  for (const radical of radicals) {
+    const owner = data.find((entry) => entry.kanji === radical.glyph);
+    const deps = owner
+      ? [...new Set((owner.radicals ?? []).map((r) => r.glyph).filter((g) => g !== radical.glyph))]
+      : [];
+    dependencies.set(radical.glyph, deps);
+    for (const dependency of deps) {
+      if (!byGlyph.has(dependency)) {
+        fail(failures, "dependency has no radical card", `${radical.glyph} → ${dependency}`);
+      }
+    }
+  }
+
+  const visiting = new Set();
+  const visited = new Set();
+  const visit = (glyph, path = []) => {
+    if (visiting.has(glyph)) {
+      fail(failures, `dependency cycle: ${[...path, glyph].join(" → ")}`, glyph);
+      return;
+    }
+    if (visited.has(glyph)) return;
+    visiting.add(glyph);
+    for (const dependency of dependencies.get(glyph) ?? []) visit(dependency, [...path, glyph]);
+    visiting.delete(glyph);
+    visited.add(glyph);
+  };
+  for (const glyph of dependencies.keys()) visit(glyph);
 
   const expectedOrder = [...byGlyph.keys()].sort(
     (a, b) =>

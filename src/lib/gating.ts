@@ -1,4 +1,5 @@
 import { getKanji, type KanjiEntry } from './kanji'
+import { getRadicalDependencies } from './radicals'
 import { bareId, cardId, typeOf, type SrsCard } from './srs'
 import { VOCAB_DATA, type VocabEntry } from './vocab'
 
@@ -49,6 +50,21 @@ export function isKanjiUnlocked(entry: KanjiEntry, ctx: GateContext): boolean {
   return entry.radicals.every(
     ({ glyph }) => glyph === entry.kanji || isComponentSeen(glyph, ctx),
   )
+}
+
+/** Radical-specific dependency predicate: only the exact radical/kanji card counts. */
+export function isRadicalComponentSeen(glyph: string, ctx: GateContext): boolean {
+  return ctx.seenIds.has(cardId('radical', glyph)) || ctx.seenIds.has(cardId('kanji', glyph))
+}
+
+/** A radical is new-card eligible once every direct component has been seen. */
+export function isRadicalUnlocked(glyph: string, ctx: GateContext): boolean {
+  return getRadicalDependencies(glyph).every((component) => isRadicalComponentSeen(component, ctx))
+}
+
+/** Direct components still blocking a radical card. */
+export function missingRadicalComponents(glyph: string, ctx: GateContext): string[] {
+  return getRadicalDependencies(glyph).filter((component) => !isRadicalComponentSeen(component, ctx))
 }
 
 /** Components still blocking an unlocked-to-be kanji (Deck drill-down list). */

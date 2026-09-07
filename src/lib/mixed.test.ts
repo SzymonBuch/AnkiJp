@@ -7,7 +7,7 @@ import {
   TYPE_RANK,
 } from './mixed'
 import { KANJI_DATA } from './kanji'
-import { RADICALS_DATA } from './radicals'
+import { RADICALS_DATA, getRadicalDependencies } from './radicals'
 import { VOCAB_DATA } from './vocab'
 import { cardId, createCard, type SrsCard } from './srs'
 
@@ -56,6 +56,15 @@ describe('introducedAt (freshness heuristic)', () => {
   it('is always 0 for radicals — they depend on nothing', () => {
     const glyph = RADICALS_DATA[0].glyph
     expect(introducedAt(card(cardId('radical', glyph)), new Map())).toBe(0)
+  })
+
+  it('dates a radical by its newest direct component only', () => {
+    const deps = getRadicalDependencies('動')
+    const intro = new Map([
+      [cardId('radical', deps[0]), NOW - 500],
+      [cardId('kanji', deps[1]), NOW - 100],
+    ])
+    expect(introducedAt(card(cardId('radical', '動')), intro)).toBe(NOW - 100)
   })
 
   it('dates a kanji by its newest introduced component', () => {

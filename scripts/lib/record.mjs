@@ -27,7 +27,7 @@ export function mergeSentences(jpdbSentences, tatoeba, vocab) {
 
 /** jpdb mnemonic wins; AI-filled one second; empty "ai" placeholder last. */
 export function pickMnemonic(kanji, jpdbMnemonic, ai) {
-  const aiMnemonic = ai?.[kanji]?.mnemonic?.trim();
+  const aiMnemonic = (ai?.[`kanji:${kanji}`] ?? ai?.[kanji])?.mnemonic?.trim();
   if (jpdbMnemonic.trim()) return { mnemonic: jpdbMnemonic.trim(), source: "jpdb" };
   if (aiMnemonic) return { mnemonic: aiMnemonic, source: "ai" };
   return { mnemonic: "", source: "ai" };

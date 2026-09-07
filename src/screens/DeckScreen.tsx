@@ -210,6 +210,11 @@ export function DeckScreen({ onExit, focus = null }: DeckScreenProps) {
     if (card) setSelected(card)
   }
 
+  const openRadicalDetail = async (glyph: string) => {
+    const card = await getCard(cardId('radical', glyph))
+    if (card) setSelected(card)
+  }
+
   return (
     <div className="flex min-h-svh flex-col">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
@@ -446,6 +451,10 @@ export function DeckScreen({ onExit, focus = null }: DeckScreenProps) {
           settings={settings}
           onToggleKnown={(known) => toggleKnown(selected.id, known)}
           onSelectKanji={openKanjiDetail}
+          onSelectRadical={openRadicalDetail}
+          drawing={drawings[selected.id] ?? null}
+          onDraw={() => setPadOpen(true)}
+          onDeleteDrawing={removeDrawing}
           onClose={() => setSelected(null)}
         />
       )}
@@ -460,6 +469,7 @@ export function DeckScreen({ onExit, focus = null }: DeckScreenProps) {
           onToggleIgnored={(ignored) => toggleIgnored(selected.id, ignored)}
           onDraw={() => setPadOpen(true)}
           onDeleteDrawing={removeDrawing}
+          onSelectRadical={openRadicalDetail}
           onClose={() => setSelected(null)}
         />
       )}
@@ -478,7 +488,8 @@ export function DeckScreen({ onExit, focus = null }: DeckScreenProps) {
 
       {selected && padOpen && (
         <DrawingPad
-          kanji={bareId(selected.id)}
+          label={bareId(selected.id)}
+          type={typeOf(selected.id) === 'radical' ? 'radical' : 'kanji'}
           initial={drawings[selected.id] ?? null}
           onSave={saveDrawing}
           onClose={() => setPadOpen(false)}

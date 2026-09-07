@@ -1,4 +1,5 @@
 import type { KanjiEntry } from '../lib/kanji'
+import { hasRadical } from '../lib/radicals'
 import type { Rating, SrsCard } from '../lib/srs'
 import { jpdbKanjiUrl } from '../lib/externalLinks'
 import { Furigana } from './Furigana'
@@ -15,9 +16,10 @@ interface StudyCardProps {
   onRate: (rating: Rating) => void
   /** Radicals have no Ignore (decision #10); kanji sessions always do. */
   onIgnore?: () => void
+  onSelectRadical?: (glyph: string) => void
 }
 
-export function StudyCard({ entry, card, revealed, drawing, onReveal, onRate, onIgnore }: StudyCardProps) {
+export function StudyCard({ entry, card, revealed, drawing, onReveal, onRate, onIgnore, onSelectRadical }: StudyCardProps) {
   if (!revealed) {
     return (
       <div className="flex flex-col items-center gap-10 py-12">
@@ -66,13 +68,25 @@ export function StudyCard({ entry, card, revealed, drawing, onReveal, onRate, on
         </h3>
         <div className="flex flex-wrap gap-2">
           {entry.radicals.map((radical, index) => (
-            <span
+            hasRadical(radical.glyph) && onSelectRadical ? (
+              <button
+                key={index}
+                type="button"
+                onClick={() => onSelectRadical(radical.glyph)}
+                className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-700 transition hover:border-slate-400 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500"
+              >
+                <span className="mr-1.5 text-lg leading-none">{radical.glyph}</span>
+                {radical.keyword}
+              </button>
+            ) : (
+              <span
               key={index}
               className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
             >
               <span className="mr-1.5 text-lg leading-none">{radical.glyph}</span>
               {radical.keyword}
-            </span>
+              </span>
+            )
           ))}
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { EXOTIC_GLYPHS, describeCodePoint } from './glyphs'
 import { KANJI_DATA } from './kanji'
-import { RADICALS_DATA, getKanjiUsing, getRadical } from './radicals'
+import { RADICALS_DATA, getKanjiUsing, getRadical, getRadicalDependencies, hasRadical } from './radicals'
 
 describe('RADICALS_DATA', () => {
   it('has unique glyphs with keywords (decision #18: the components of the final deck)', () => {
@@ -41,6 +41,26 @@ describe('getRadical', () => {
   it('returns entries and throws for unknown glyphs', () => {
     expect(getRadical(RADICALS_DATA[0].glyph).keyword.length).toBeGreaterThan(0)
     expect(() => getRadical('〄')).toThrow(/unknown radical/i)
+  })
+})
+
+describe('getRadicalDependencies', () => {
+  it('derives the direct 動 and 重 dependencies from kanji data', () => {
+    expect(getRadicalDependencies('動')).toEqual(['重', '力'])
+    expect(getRadicalDependencies('重')).toEqual(['千', '里'])
+  })
+
+  it('treats non-kanji components as leaves and drops self-fallbacks', () => {
+    expect(getRadicalDependencies('亻')).toEqual([])
+    expect(getRadicalDependencies('一')).toEqual([])
+  })
+
+  it('has a radical card for every dependency', () => {
+    for (const entry of RADICALS_DATA) {
+      for (const dependency of getRadicalDependencies(entry.glyph)) {
+        expect(hasRadical(dependency)).toBe(true)
+      }
+    }
   })
 })
 

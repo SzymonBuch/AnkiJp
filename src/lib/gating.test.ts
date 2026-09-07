@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildGateContext, isComponentSeen, isKanjiUnlocked, isVocabUnlocked, missingComponents } from './gating'
+import { buildGateContext, isComponentSeen, isKanjiUnlocked, isRadicalUnlocked, isVocabUnlocked, missingComponents, missingRadicalComponents } from './gating'
+import { getRadicalDependencies } from './radicals'
 import { KANJI_DATA } from './kanji'
 import { RADICALS_DATA } from './radicals'
 import { VOCAB_DATA } from './vocab'
@@ -114,6 +115,41 @@ describe('isKanjiUnlocked (decision #3, self-references ignored per #2)', () => 
     const stillMissing = missingComponents(sibling, ctx)
     if (stillMissing.length === 0) expect(isKanjiUnlocked(sibling, ctx)).toBe(true)
     else expect(isKanjiUnlocked(sibling, ctx)).toBe(false)
+  })
+})
+
+describe('radical gating', () => {
+  it('keeps a dependent radical locked until every direct component is seen', () => {
+    const ctx = buildGateContext([])
+    expect(isRadicalUnlocked('動', ctx)).toBe(false)
+    expect(missingRadicalComponents('動', ctx)).toEqual(getRadicalDependencies('動'))
+  })
+
+  it('accepts either the radical or same-glyph kanji card as seen', () => {
+    const [first, second] = getRadicalDependencies('動')
+    const radicalSeen = buildGateContext([
+      card(cardId('radical', first), 'learning'),
+      card(cardId('radical', second), 'review'),
+    ])
+    expect(isRadicalUnlocked('動', radicalSeen)).toBe(true)
+
+    const kanjiSeen = buildGateContext([
+      card(cardId('kanji', first), 'learning'),
+      card(cardId('radical', second), 'review'),
+    ])
+    expect(isRadicalUnlocked('動', kanjiSeen)).toBe(true)
+  })
+
+  it('does not use a host kanji containing the component as a shortcut', () => {
+    const host = KANJI_DATA.find((entry) => entry.kanji !== '動' && entry.radicals.some((r) => r.glyph === '動'))
+    if (!host) return
+    const ctx = buildGateContext([card(cardId('kanji', host.kanji), 'review')])
+    expect(ctx.componentsOfSeenKanji.has('動')).toBe(true)
+    expect(isRadicalUnlocked('動', ctx)).toBe(false)
+  })
+
+  it('leaves a root radical available from the start', () => {
+    expect(isRadicalUnlocked('一', buildGateContext([]))).toBe(true)
   })
 })
 

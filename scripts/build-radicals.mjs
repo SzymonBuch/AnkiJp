@@ -1,6 +1,8 @@
 import {
   KANJI_DATA_PATH,
   RADICALS_DATA_PATH,
+  JPDB_SCRAPE_PATH,
+  AI_PATH,
   readJsonFile,
   writeJsonFile,
 } from "./lib/common.mjs";
@@ -12,13 +14,16 @@ import {
  * and never gate anything (#2), so they are excluded here — verify.mjs
  * mirrors that exclusion in rule #19.
  *
- * Output: [{glyph, keyword}] unique, sorted by usage frequency across the
+ * Output: [{glyph, keyword, usedIn, mnemonic, mnemonicSource}] unique, sorted by usage frequency across the
  * deck (most-used first); pos of a radical card is its index in this order
  * (decision #15).
  */
 function main() {
   const deck = readJsonFile(KANJI_DATA_PATH, []);
   if (!deck.length) throw new Error("kanji.json is empty");
+  const scraped = readJsonFile(JPDB_SCRAPE_PATH, {});
+  const ai = readJsonFile(AI_PATH, {});
+  const kanjiByGlyph = new Map(deck.map((entry) => [entry.kanji, entry]));
 
   const byGlyph = new Map();
   const firstAppearance = new Map();
@@ -38,6 +43,24 @@ function main() {
       b.usedIn - a.usedIn ||
       (firstAppearance.get(a.glyph) ?? Infinity) - (firstAppearance.get(b.glyph) ?? Infinity),
   );
+  for (const radical of radicals) {
+    const kanji = kanjiByGlyph.get(radical.glyph);
+    const jpdbMnemonic = scraped[radical.glyph]?.mnemonic?.trim() ?? "";
+    const aiMnemonic = ai[`radical:${radical.glyph}`]?.mnemonic?.trim() ?? "";
+    if (kanji?.mnemonic?.trim()) {
+      radical.mnemonic = kanji.mnemonic.trim();
+      radical.mnemonicSource = kanji.mnemonicSource === "jpdb" ? "jpdb" : "ai";
+    } else if (jpdbMnemonic) {
+      radical.mnemonic = jpdbMnemonic;
+      radical.mnemonicSource = "jpdb";
+    } else if (aiMnemonic) {
+      radical.mnemonic = aiMnemonic;
+      radical.mnemonicSource = "ai";
+    } else {
+      radical.mnemonic = "";
+      radical.mnemonicSource = "ai";
+    }
+  }
   writeJsonFile(RADICALS_DATA_PATH, radicals, true);
 
   const counts = radicals.map((r) => r.usedIn);

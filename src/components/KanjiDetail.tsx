@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { Settings } from '../lib/db'
 import type { KanjiEntry } from '../lib/kanji'
+import { hasRadical } from '../lib/radicals'
 import type { SrsCard } from '../lib/srs'
 import { jpdbKanjiUrl } from '../lib/externalLinks'
 import { Furigana } from './Furigana'
@@ -17,6 +18,7 @@ export interface KanjiDetailProps {
   onDraw?: () => void
   onDeleteDrawing?: () => void
   onClose: () => void
+  onSelectRadical?: (glyph: string) => void
 }
 
 const STATE_LABEL: Record<SrsCard['state'], string> = {
@@ -27,7 +29,7 @@ const STATE_LABEL: Record<SrsCard['state'], string> = {
 }
 
 /** Full card details: every meaning and every example sentence plus SRS state. */
-export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onToggleIgnored, onDraw, onDeleteDrawing, onClose }: KanjiDetailProps) {
+export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onToggleIgnored, onDraw, onDeleteDrawing, onClose, onSelectRadical }: KanjiDetailProps) {
   const meanings = entry.meanings.length > 0 && entry.meanings[0] !== entry.meaning
     ? entry.meanings
     : [entry.meaning]
@@ -116,13 +118,25 @@ export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onT
             </h3>
             <div className="flex flex-wrap gap-2">
               {entry.radicals.map((radical, index) => (
-                <span
+                hasRadical(radical.glyph) && onSelectRadical ? (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => onSelectRadical(radical.glyph)}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-700 transition hover:border-slate-400 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500"
+                  >
+                    <span className="mr-1.5 text-lg leading-none">{radical.glyph}</span>
+                    {radical.keyword}
+                  </button>
+                ) : (
+                  <span
                   key={index}
                   className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
                 >
                   <span className="mr-1.5 text-lg leading-none">{radical.glyph}</span>
                   {radical.keyword}
-                </span>
+                  </span>
+                )
               ))}
             </div>
           </section>

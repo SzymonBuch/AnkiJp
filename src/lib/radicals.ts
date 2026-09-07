@@ -6,6 +6,8 @@ export interface RadicalEntry {
   keyword: string
   /** How many deck kanji use this component (usage ranking, most-used first). */
   usedIn: number
+  mnemonic: string
+  mnemonicSource: 'jpdb' | 'ai'
 }
 
 /**
@@ -39,6 +41,20 @@ export function getRadical(glyph: string): RadicalEntry {
   const entry = byGlyph.get(glyph)
   if (!entry) throw new Error(`Unknown radical: ${glyph}`)
   return entry
+}
+
+/** Whether the final deck contains a card for this component glyph. */
+export function hasRadical(glyph: string): boolean {
+  return byGlyph.has(glyph)
+}
+
+/** Direct radical dependencies for a glyph, with self-fallbacks removed. */
+export function getRadicalDependencies(glyph: string): string[] {
+  const entry = KANJI_DATA.find((candidate) => candidate.kanji === glyph)
+  if (!entry) return []
+  return [...new Set(entry.radicals
+    .map((radical) => radical.glyph)
+    .filter((component) => component !== glyph))]
 }
 
 /** Deck kanji whose decomposition contains this component, most-used first. */

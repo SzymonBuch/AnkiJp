@@ -10,6 +10,7 @@ import {
   clearDrawings,
   closeDb,
   deleteDrawing,
+  deleteCard,
   ensureSeeded,
   getAllCards,
   getAllDrawings,
@@ -31,7 +32,7 @@ import {
   setSettings,
 } from './db'
 import { KANJI_DATA } from './kanji'
-import { RADICALS_DATA } from './radicals'
+import { RADICALS_DATA, getRadicalDependencies } from './radicals'
 import { VOCAB_DATA } from './vocab'
 import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
 import { TYPE_RANK } from './mixed'
@@ -81,6 +82,21 @@ describe('seeding', () => {
       expect(card.state).toBe('new')
       expect(card.known).toBe(false)
     }
+  })
+
+  it('tops up missing radicals without overwriting existing progress', async () => {
+    const target = RADICALS_DATA[0]
+    const existing = (await getCard(`r:${target.glyph}`))!
+    existing.state = 'review'
+    existing.interval = 9
+    existing.reps = 4
+    await putCard(existing)
+    await deleteCard(`r:${RADICALS_DATA[1].glyph}`)
+
+    await ensureSeeded()
+
+    expect(await getCard(existing.id)).toEqual(existing)
+    expect(await getCard(`r:${RADICALS_DATA[1].glyph}`)).toMatchObject({ state: 'new' })
   })
 })
 
@@ -303,6 +319,31 @@ describe('content types', () => {
       await putCard(card)
       const q = await getSessionQueue('kanji', NOW)
       expect(q.review.map((c) => c.id)).toContain(cardId('kanji', GATED.kanji))
+    })
+  })
+
+  describe('radical gating', () => {
+    it('does not queue a new dependent radical before its direct components', async () => {
+      await setSettings({ newPerDayRadical: RADICALS_DATA.length })
+      expect((await getSessionQueue('radical', NOW)).fresh.map((c) => c.id)).not.toContain('r:動')
+    })
+
+    it('allows an existing learning card despite radical gating', async () => {
+      const target = (await getCard('r:動'))!
+      target.state = 'learning'
+      target.step = 0
+      target.due = NOW - 1
+      await putCard(target)
+      expect((await getSessionQueue('radical', NOW)).learning.map((c) => c.id)).toContain('r:動')
+    })
+
+    it('unlocks a dependent radical after its direct components are seen', async () => {
+      await setSettings({ newPerDayRadical: RADICALS_DATA.length })
+      for (const glyph of getRadicalDependencies('動')) {
+        const dependency = (await getCard(`r:${glyph}`))!
+        await putCard({ ...dependency, state: 'learning', step: 0, due: NOW })
+      }
+      expect((await getSessionQueue('radical', NOW)).fresh.map((c) => c.id)).toContain('r:動')
     })
   })
 
@@ -904,6 +945,17 @@ describe('drawings', () => {
     closeDb()
     expect(await getDrawing('k:一')).toEqual(A)
     expect(await getAllDrawings()).toEqual([A])
+  })
+
+  it('keeps kanji and radical drawings independent', async () => {
+    const radical = { id: 'r:一', dataUrl: 'data:image/png;base64,RRR', updatedAt: NOW }
+    await putDrawing(A)
+    await putDrawing(radical)
+    expect(await getDrawing(A.id)).toEqual(A)
+    expect(await getDrawing(radical.id)).toEqual(radical)
+    await deleteDrawing(radical.id)
+    expect(await getDrawing(A.id)).toEqual(A)
+    expect(await getDrawing(radical.id)).toBeUndefined()
   })
 
   it('resetProgress keeps drawings (they are personal notes, not SRS state)', async () => {

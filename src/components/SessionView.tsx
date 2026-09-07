@@ -13,6 +13,7 @@ import {
 } from '../lib/useStudySession'
 import { KanjiDetail } from './KanjiDetail'
 import { RadicalCard } from './RadicalCard'
+import { RadicalDetail } from './RadicalDetail'
 import { StudyCard } from './StudyCard'
 import { VocabCard } from './VocabCard'
 
@@ -94,6 +95,10 @@ export function SessionView({ kind, type = 'kanji', title, onExit }: SessionView
     setSelected((await markIgnored(selected.id, ignored)) ?? null)
   }
 
+  const openSelected = (type: 'kanji' | 'radical', glyph: string) => {
+    getCard(cardId(type, glyph)).then((card) => card && setSelected(card))
+  }
+
   const current = session.current
 
   return (
@@ -131,9 +136,9 @@ export function SessionView({ kind, type = 'kanji', title, onExit }: SessionView
                 revealed={revealed}
                 onReveal={reveal}
                 onRate={rate}
-                onSelectKanji={(kanji) => {
-                  getCard(cardId('kanji', kanji)).then((card) => card && setSelected(card))
-                }}
+                drawing={drawings.get(current.id) ?? null}
+                onSelectKanji={(kanji) => openSelected('kanji', kanji)}
+                onSelectRadical={(glyph) => openSelected('radical', glyph)}
               />
             ) : typeOf(current.id) === 'vocab' ? (
               <VocabCard
@@ -142,9 +147,7 @@ export function SessionView({ kind, type = 'kanji', title, onExit }: SessionView
                 revealed={revealed}
                 onReveal={reveal}
                 onRate={rate}
-                onSelectKanji={(kanji) => {
-                  getCard(cardId('kanji', kanji)).then((card) => card && setSelected(card))
-                }}
+                onSelectKanji={(kanji) => openSelected('kanji', kanji)}
                 onIgnore={session.canIgnore ? session.ignore : undefined}
               />
             ) : (
@@ -156,6 +159,7 @@ export function SessionView({ kind, type = 'kanji', title, onExit }: SessionView
                 onReveal={reveal}
                 onRate={rate}
                 onIgnore={session.canIgnore ? session.ignore : undefined}
+                onSelectRadical={(glyph) => openSelected('radical', glyph)}
               />
             )}
           </>
@@ -177,13 +181,25 @@ export function SessionView({ kind, type = 'kanji', title, onExit }: SessionView
         )}
       </main>
 
-      {selected && settings && (
+      {selected && settings && typeOf(selected.id) === 'kanji' && (
         <KanjiDetail
           entry={getKanji(bareId(selected.id))}
           card={selected}
           settings={settings}
           onToggleKnown={toggleSelectedKnown}
           onToggleIgnored={toggleSelectedIgnored}
+          onClose={() => setSelected(null)}
+          onSelectRadical={(glyph) => openSelected('radical', glyph)}
+        />
+      )}
+      {selected && settings && typeOf(selected.id) === 'radical' && (
+        <RadicalDetail
+          entry={getRadical(bareId(selected.id))}
+          card={selected}
+          settings={settings}
+          onToggleKnown={toggleSelectedKnown}
+          onSelectKanji={(kanji) => openSelected('kanji', kanji)}
+          onSelectRadical={(glyph) => openSelected('radical', glyph)}
           onClose={() => setSelected(null)}
         />
       )}

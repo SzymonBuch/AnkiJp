@@ -16,7 +16,13 @@ import { KANJI_DATA, getKanji } from './kanji'
 import { RADICALS_DATA } from './radicals'
 import { VOCAB_DATA } from './vocab'
 import { DEFAULT_QUIZ_CONFIG, type QuizConfig } from './quiz'
-import { buildGateContext, isComponentSeen, isKanjiUnlocked, isVocabUnlocked } from './gating'
+import {
+  buildGateContext,
+  isComponentSeen,
+  isKanjiUnlocked,
+  isRadicalUnlocked,
+  isVocabUnlocked,
+} from './gating'
 import {
   compareStudyMixed,
   CONTENT_TYPES,
@@ -238,6 +244,10 @@ export async function ensureSeeded(): Promise<void> {
   if (!seeded.has('radical')) {
     await seedRadicals()
     await stampSeeded(db, 'radical')
+  } else {
+    // The bundled data can grow after a database was first seeded. Top up only
+    // missing cards; existing SRS records are never rewritten.
+    await seedRadicals()
   }
   // Vocabulary is never stamped: its materialization is continuous, driven by
   // gating and the daily budget (every queue/summary/pool build lands here).
@@ -283,13 +293,18 @@ async function materializeVocab(now: number): Promise<void> {
  */
 async function seedRadicals(): Promise<void> {
   const now = Date.now()
-  const ctx = buildGateContext(await getAllCards())
+  const existing = await getAllCards()
+  const existingIds = new Set(existing.map((card) => card.id))
+  const ctx = buildGateContext(existing)
   const { knownThresholdDays } = await getSettings()
-  const cards: SrsCard[] = RADICALS_DATA.map((entry, pos) => {
-    let card = createCard(cardId('radical', entry.glyph), pos, now)
-    if (isComponentSeen(entry.glyph, ctx)) card = applyKnown(card, knownThresholdDays, now)
-    return card
-  })
+  const cards: SrsCard[] = RADICALS_DATA
+    .filter((entry) => !existingIds.has(cardId('radical', entry.glyph)))
+    .map((entry) => {
+      const pos = RADICALS_DATA.indexOf(entry)
+      let card = createCard(cardId('radical', entry.glyph), pos, now)
+      if (isComponentSeen(entry.glyph, ctx)) card = applyKnown(card, knownThresholdDays, now)
+      return card
+    })
   await bulkPutCards(cards)
 }
 
@@ -303,6 +318,10 @@ export async function getAllCards(): Promise<SrsCard[]> {
 
 export async function putCard(card: SrsCard): Promise<void> {
   await (await getDb()).put('cards', card)
+}
+
+export async function deleteCard(id: string): Promise<void> {
+  await (await getDb()).delete('cards', id)
 }
 
 export async function bulkPutCards(cards: SrsCard[]): Promise<void> {
@@ -423,7 +442,7 @@ export async function getSessionQueue(
   const learning: SrsCard[] = []
   const due: SrsCard[] = []
   const freshBands: SrsCard[][] = []
-  const gateCtx = types.includes('kanji') ? buildGateContext(cards) : null
+  const gateCtx = buildGateContext(cards)
 
   types.forEach((t, index) => {
     const ofType = cards.filter((c) => typeOf(c.id) === t && !c.ignored)
@@ -440,8 +459,13 @@ export async function getSessionQueue(
       ofType
         .filter((c) => c.state === 'new')
         .sort((a, b) => a.pos - b.pos)
-        // Only kanji are gated (#3); radicals and words pass through.
-        .filter((c) => gateCtx === null || typeOf(c.id) !== 'kanji' || isKanjiUnlocked(getKanji(bareId(c.id)), gateCtx))
+        .filter((c) =>
+          typeOf(c.id) === 'kanji'
+            ? isKanjiUnlocked(getKanji(bareId(c.id)), gateCtx)
+            : typeOf(c.id) === 'radical'
+              ? isRadicalUnlocked(bareId(c.id), gateCtx)
+              : true,
+        )
         .slice(0, Math.max(0, settings[freshLimitKey] - perTypeCounts[index].newToday)),
     )
   })
