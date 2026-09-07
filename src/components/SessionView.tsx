@@ -1,34 +1,65 @@
 import { useEffect, useState } from 'react'
-import { getAllDrawings } from '../lib/db'
+import { getAllCards, getAllDrawings, getCard, getSettings, markIgnored, markKnown, type Settings } from '../lib/db'
+import { lockedVocabRows } from '../lib/gating'
 import { getKanji } from '../lib/kanji'
-import type { Rating } from '../lib/srs'
+import type { SessionType } from '../lib/mixed'
+import { getRadical } from '../lib/radicals'
+import { getVocab } from '../lib/vocab'
+import { bareId, cardId, typeOf, type Rating, type SrsCard } from '../lib/srs'
 import {
   useStudySession,
   type SessionKind,
   type SessionProgress,
 } from '../lib/useStudySession'
+import { KanjiDetail } from './KanjiDetail'
+import { RadicalCard } from './RadicalCard'
+import { RadicalDetail } from './RadicalDetail'
 import { StudyCard } from './StudyCard'
+import { VocabCard } from './VocabCard'
 
 interface SessionViewProps {
   kind: SessionKind
+  /** One content type or a mixed session over all of them (Etap 5). */
+  type?: SessionType
   title: string
   onExit: () => void
 }
 
-export function SessionView({ kind, title, onExit }: SessionViewProps) {
-  const session = useStudySession(kind)
+export function SessionView({ kind, type = 'kanji', title, onExit }: SessionViewProps) {
+  const session = useStudySession(kind, type)
   const { status, revealed, rate, reveal } = session
   const [drawings, setDrawings] = useState<Map<string, string>>(new Map())
+  const [settings, setSettings] = useState<Settings | null>(null)
+  /** Kanji detail opened from a radical's "used in" grid. */
+  const [selected, setSelected] = useState<SrsCard | null>(null)
+  /**
+   * Words whose kanji are not all studied yet — shown when a vocab session
+   * runs dry, so "All caught up" never reads like "there is nothing left".
+   */
+  const [lockedVocab, setLockedVocab] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    getAllDrawings().then((list) => {
-      if (!cancelled) setDrawings(new Map(list.map((d) => [d.kanji, d.dataUrl])))
+    Promise.all([getAllDrawings(), getSettings()]).then(([drawingList, loadedSettings]) => {
+      if (cancelled) return
+      setDrawings(new Map(drawingList.map((d) => [d.id, d.dataUrl])))
+      setSettings(loadedSettings)
     })
     return () => {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (type !== 'vocab') return
+    let cancelled = false
+    getAllCards().then((cards) => {
+      if (!cancelled) setLockedVocab(lockedVocabRows(cards).length)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [type, status])
 
   useEffect(() => {
     const shortcuts: Record<string, Rating> = {
@@ -39,6 +70,7 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
     }
     const onKey = (event: KeyboardEvent) => {
       if (event.repeat || status !== 'ready') return
+      if (selected !== null) return
       if (!revealed) {
         if (event.code === 'Space' || event.code === 'Enter') {
           event.preventDefault()
@@ -51,7 +83,23 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [status, revealed, rate, reveal])
+  }, [status, revealed, rate, reveal, selected])
+
+  const toggleSelectedKnown = async (known: boolean) => {
+    if (!selected) return
+    setSelected((await markKnown(selected.id, known)) ?? null)
+  }
+
+  const toggleSelectedIgnored = async (ignored: boolean) => {
+    if (!selected) return
+    setSelected((await markIgnored(selected.id, ignored)) ?? null)
+  }
+
+  const openSelected = (type: 'kanji' | 'radical', glyph: string) => {
+    getCard(cardId(type, glyph)).then((card) => card && setSelected(card))
+  }
+
+  const current = session.current
 
   return (
     <div className="flex min-h-svh flex-col">
@@ -79,25 +127,82 @@ export function SessionView({ kind, title, onExit }: SessionViewProps) {
 
       <main className="mx-auto w-full max-w-xl flex-1 p-4">
         {status === 'loading' && <p className="py-12 text-center text-slate-500 dark:text-slate-400">Loading…</p>}
-        {status === 'ready' && session.current && (
-          <StudyCard
-            entry={getKanji(session.current.kanji)}
-            card={session.current}
-            revealed={revealed}
-            drawing={drawings.get(session.current.kanji) ?? null}
-            onReveal={reveal}
-            onRate={rate}
-            onIgnore={session.ignore}
-          />
+        {status === 'ready' && current && (
+          <>
+            {typeOf(current.id) === 'radical' ? (
+              <RadicalCard
+                entry={getRadical(bareId(current.id))}
+                card={current}
+                revealed={revealed}
+                onReveal={reveal}
+                onRate={rate}
+                drawing={drawings.get(current.id) ?? null}
+                onSelectKanji={(kanji) => openSelected('kanji', kanji)}
+                onSelectRadical={(glyph) => openSelected('radical', glyph)}
+              />
+            ) : typeOf(current.id) === 'vocab' ? (
+              <VocabCard
+                entry={getVocab(bareId(current.id))}
+                card={current}
+                revealed={revealed}
+                onReveal={reveal}
+                onRate={rate}
+                onSelectKanji={(kanji) => openSelected('kanji', kanji)}
+                onIgnore={session.canIgnore ? session.ignore : undefined}
+              />
+            ) : (
+              <StudyCard
+                entry={getKanji(bareId(current.id))}
+                card={current}
+                revealed={revealed}
+                drawing={drawings.get(current.id) ?? null}
+                onReveal={reveal}
+                onRate={rate}
+                onIgnore={session.canIgnore ? session.ignore : undefined}
+                onSelectRadical={(glyph) => openSelected('radical', glyph)}
+              />
+            )}
+          </>
         )}
         {(status === 'done' || status === 'empty') && (
-          <Summary
-            empty={status === 'empty'}
-            progress={session.progress}
-            onExit={onExit}
-          />
+          <>
+            {type === 'vocab' && status === 'empty' && lockedVocab > 0 && (
+              <p className="mx-auto mb-4 max-w-md rounded-xl border border-sky-300 bg-sky-50 p-3 text-center text-sm text-sky-800 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+                <span className="font-bold tabular-nums">{lockedVocab}</span> more words will
+                unlock as you study their kanji — see the Deck for the roadmap.
+              </p>
+            )}
+            <Summary
+              empty={status === 'empty'}
+              progress={session.progress}
+              onExit={onExit}
+            />
+          </>
         )}
       </main>
+
+      {selected && settings && typeOf(selected.id) === 'kanji' && (
+        <KanjiDetail
+          entry={getKanji(bareId(selected.id))}
+          card={selected}
+          settings={settings}
+          onToggleKnown={toggleSelectedKnown}
+          onToggleIgnored={toggleSelectedIgnored}
+          onClose={() => setSelected(null)}
+          onSelectRadical={(glyph) => openSelected('radical', glyph)}
+        />
+      )}
+      {selected && settings && typeOf(selected.id) === 'radical' && (
+        <RadicalDetail
+          entry={getRadical(bareId(selected.id))}
+          card={selected}
+          settings={settings}
+          onToggleKnown={toggleSelectedKnown}
+          onSelectKanji={(kanji) => openSelected('kanji', kanji)}
+          onSelectRadical={(glyph) => openSelected('radical', glyph)}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   )
 }

@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react'
 import { getLogs } from '../lib/db'
-import { computeStats, type OverallStats } from '../lib/stats'
+import type { ContentType } from '../lib/srs'
+import { computeStats, type OverallStats, type TypeStats } from '../lib/stats'
 
 interface StatsScreenProps {
   onExit: () => void
 }
+
+const TYPE_LABELS: Record<ContentType, string> = {
+  kanji: 'Kanji',
+  radical: 'Radicals',
+  vocab: 'Words',
+}
+
+const TYPE_ORDER: readonly ContentType[] = ['radical', 'kanji', 'vocab']
 
 export function StatsScreen({ onExit }: StatsScreenProps) {
   const [stats, setStats] = useState<OverallStats | null>(null)
@@ -56,6 +65,8 @@ export function StatsScreen({ onExit }: StatsScreenProps) {
               </div>
             </div>
 
+            <ByType byType={stats.byType} />
+
             <section>
               <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Reviews per day
@@ -94,6 +105,47 @@ function Metric({ label, value }: { label: string; value: string | number }) {
       <div className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-100">{value}</div>
       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
     </div>
+  )
+}
+
+/** Per-content-type counters (Etap 6), derived from the logged id prefixes. */
+function ByType({ byType }: { byType: OverallStats['byType'] }) {
+  return (
+    <section data-testid="stats-by-type">
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        By content type
+      </h2>
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <table className="w-full text-sm tabular-nums">
+          <thead>
+            <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-wide text-slate-400 dark:border-slate-700 dark:text-slate-500">
+              <th className="px-4 py-2.5 font-medium">Type</th>
+              <th className="px-4 py-2.5 text-right font-medium">Answers</th>
+              <th className="px-4 py-2.5 text-right font-medium">New</th>
+              <th className="px-4 py-2.5 text-right font-medium">Reviews</th>
+              <th className="px-4 py-2.5 text-right font-medium">Accuracy</th>
+            </tr>
+          </thead>
+          <tbody>
+            {TYPE_ORDER.map((type) => (
+              <TypeRow key={type} label={TYPE_LABELS[type]} stats={byType[type]} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function TypeRow({ label, stats }: { label: string; stats: TypeStats }) {
+  return (
+    <tr className="border-b border-slate-100 last:border-b-0 dark:border-slate-800">
+      <td className="px-4 py-2.5 font-medium text-slate-700 dark:text-slate-300">{label}</td>
+      <td className="px-4 py-2.5 text-right text-slate-900 dark:text-slate-100">{stats.answers}</td>
+      <td className="px-4 py-2.5 text-right text-slate-600 dark:text-slate-400">{stats.newLearned}</td>
+      <td className="px-4 py-2.5 text-right text-slate-600 dark:text-slate-400">{stats.reviewsDone}</td>
+      <td className="px-4 py-2.5 text-right text-slate-600 dark:text-slate-400">{stats.accuracy}%</td>
+    </tr>
   )
 }
 

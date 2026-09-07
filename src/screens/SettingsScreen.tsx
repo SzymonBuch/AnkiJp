@@ -11,6 +11,8 @@ import {
   setSettings,
   type Settings,
 } from '../lib/db'
+import { EXOTIC_GLYPHS, describeCodePoint, isGlyphRenderable } from '../lib/glyphs'
+import { getRadical } from '../lib/radicals'
 import { computeStats } from '../lib/stats'
 import { getThemeMode, setThemeMode, type ThemeMode } from '../lib/theme'
 
@@ -37,7 +39,10 @@ export function SettingsScreen({ onExit }: SettingsScreenProps) {
     })
   }, [])
 
-  const updateNumber = (key: 'newPerDay' | 'reviewLimit' | 'knownThresholdDays', raw: string) => {
+  const updateNumber = (
+    key: 'newPerDay' | 'newPerDayRadical' | 'newPerDayVocab' | 'reviewLimit' | 'knownThresholdDays',
+    raw: string,
+  ) => {
     const value = Math.max(1, Math.floor(Number(raw) || DEFAULT_SETTINGS[key]))
     setDraft((prev) => ({ ...prev, [key]: value }))
   }
@@ -53,12 +58,12 @@ export function SettingsScreen({ onExit }: SettingsScreenProps) {
       getSettings(),
       getLogs(),
       getAllCards(),
-      getSummary(),
+      getSummary('kanji'),
       getAllDrawings(),
     ])
     const payload = {
       exportedAt: new Date().toISOString(),
-      version: 2,
+      version: 3,
       settings,
       summary,
       stats: computeStats(logs),
@@ -117,10 +122,22 @@ export function SettingsScreen({ onExit }: SettingsScreenProps) {
                 Daily limits
               </h2>
               <NumberField
-                label="New cards per day"
-                hint="How many new cards are introduced each day."
+                label="New kanji per day"
+                hint="How many new kanji are introduced each day."
                 value={draft.newPerDay}
                 onChange={(raw) => updateNumber('newPerDay', raw)}
+              />
+              <NumberField
+                label="New radicals per day"
+                hint="Radical cards are quick — the default is deliberately higher than for kanji."
+                value={draft.newPerDayRadical}
+                onChange={(raw) => updateNumber('newPerDayRadical', raw)}
+              />
+              <NumberField
+                label="New words per day"
+                hint="How many new words are introduced each day — words unlock as their kanji are studied."
+                value={draft.newPerDayVocab}
+                onChange={(raw) => updateNumber('newPerDayVocab', raw)}
               />
               <NumberField
                 label="Review limit per day"
@@ -163,6 +180,38 @@ export function SettingsScreen({ onExit }: SettingsScreenProps) {
                     {label}
                   </button>
                 ))}
+              </div>
+            </section>
+
+            <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Exotic glyph checklist
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Radical code points that common CJK fonts often miss. Verify each renders as a
+                character (not an empty box) on every device you use.
+              </p>
+              <div className="grid grid-cols-7 gap-2">
+                {EXOTIC_GLYPHS.map((glyph) => {
+                  const ok = isGlyphRenderable(glyph)
+                  const keyword = safeRadicalKeyword(glyph)
+                  return (
+                    <div
+                      key={glyph}
+                      title={`${describeCodePoint(glyph)}${keyword ? ` — ${keyword}` : ''}`}
+                      className={`flex flex-col items-center gap-1 rounded-xl border px-1 py-2 ${
+                        ok
+                          ? 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800'
+                          : 'border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950/40'
+                      }`}
+                    >
+                      <span className="text-2xl leading-none">{glyph}</span>
+                      <span className="font-mono text-[9px] text-slate-400 dark:text-slate-500">
+                        {describeCodePoint(glyph)}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </section>
 
@@ -231,4 +280,13 @@ function NumberField({
       />
     </label>
   )
+}
+
+/** Keyword for the checklist tooltips; null when the glyph is not a radical. */
+function safeRadicalKeyword(glyph: string): string | null {
+  try {
+    return getRadical(glyph).keyword
+  } catch {
+    return null
+  }
 }

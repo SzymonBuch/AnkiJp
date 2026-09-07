@@ -13,14 +13,15 @@ interface Point {
 }
 
 interface DrawingPadProps {
-  kanji: string
+  label: string
+  type: 'kanji' | 'radical'
   initial?: string | null
   onSave: (dataUrl: string) => void
   onClose: () => void
 }
 
 /** Modal drawing pad for user-made mnemonic sketches (F3). */
-export function DrawingPad({ kanji, initial, onSave, onClose }: DrawingPadProps) {
+export function DrawingPad({ label, type, initial, onSave, onClose }: DrawingPadProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const undoStack = useRef<ImageData[]>([])
   const drawingRef = useRef(false)
@@ -138,7 +139,7 @@ export function DrawingPad({ kanji, initial, onSave, onClose }: DrawingPadProps)
       <div className="mx-auto flex min-h-full w-full max-w-xl flex-col items-center gap-4 p-4">
         <div className="flex w-full items-center justify-between">
           <h2 className="text-lg font-semibold">
-            My drawing — <span className="text-2xl">{kanji}</span>
+            My {type} drawing — <span className="text-2xl">{label}</span>
           </h2>
           <button
             type="button"
@@ -197,6 +198,7 @@ export function DrawingPad({ kanji, initial, onSave, onClose }: DrawingPadProps)
 
         <canvas
           ref={canvasRef}
+          aria-label={`Drawing canvas for ${type} ${label}`}
           width={SIZE}
           height={SIZE}
           style={{ width: SIZE, height: SIZE }}

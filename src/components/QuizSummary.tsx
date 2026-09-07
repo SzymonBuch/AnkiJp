@@ -1,5 +1,6 @@
 import type { QuizMode } from '../lib/quiz'
 import type { QuizAnswer } from '../lib/useQuizSession'
+import { TypeBadge } from './TypeBadge'
 
 const MODE_LABEL: Record<QuizMode, string> = {
   reading: 'Reading',
@@ -49,7 +50,23 @@ export function QuizSummary({ mode, total, correctCount, answers, onRetake, onEx
                 className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-2xl font-semibold leading-none">{answer.question.kanji}</span>
+                  <span className="text-2xl font-semibold leading-none">
+                    {answer.question.kind === 'radical'
+                      ? answer.question.glyph
+                      : answer.question.kind === 'vocab'
+                        ? answer.question.vocabId
+                        : answer.question.kanji}
+                  </span>
+                  {/* Identical fronts (`r:一` vs `k:一`) stay distinguishable. */}
+                  <TypeBadge
+                    type={
+                      answer.question.kind === 'radical'
+                        ? 'radical'
+                        : answer.question.kind === 'vocab'
+                          ? 'vocab'
+                          : 'kanji'
+                    }
+                  />
                   <div>
                     <div className="text-sm text-slate-500 dark:text-slate-400">{answer.question.prompt}</div>
                     <div className="font-medium text-green-700 dark:text-green-400">✓ {answer.question.correct}</div>

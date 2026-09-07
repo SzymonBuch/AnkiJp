@@ -1,3 +1,4 @@
+import type { SessionType } from '../lib/mixed'
 import type { QuizConfig, QuizMode, QuizSource } from '../lib/quiz'
 import type { QuizSourceCounts } from '../lib/useQuizSession'
 
@@ -5,6 +6,14 @@ const SOURCES: { source: QuizSource; label: string }[] = [
   { source: 'known', label: 'Known' },
   { source: 'progress', label: 'In progress' },
   { source: 'new', label: 'New' },
+]
+
+/** Pool scopes (Etap 5): mixed across the deck by default, or one type. */
+const SCOPES: { value: SessionType; label: string }[] = [
+  { value: 'mixed', label: 'All' },
+  { value: 'kanji', label: 'Kanji' },
+  { value: 'radical', label: 'Radicals' },
+  { value: 'vocab', label: 'Words' },
 ]
 
 const GRADES = [1, 2, 3, 4, 5, 6]
@@ -17,7 +26,29 @@ const MODES: { mode: QuizMode; title: string; description: string; glyph: string
   { mode: 'cloze', title: 'Cloze', description: 'Fill the kanji in a sentence', glyph: '例' },
 ]
 
+/** Mixed pool (Etap 5): cloze stays narrowable-to-kanji only. */
+const MIXED_MODES: { mode: QuizMode; title: string; description: string; glyph: string }[] = [
+  { mode: 'reading', title: 'Reading', description: 'Pick readings (meanings for radicals)', glyph: '読' },
+  { mode: 'meaning', title: 'Meaning', description: 'Pick meanings across the deck', glyph: '意' },
+  { mode: 'reverse', title: 'Reverse', description: 'Pick the kanji or word (meanings for radicals)', glyph: '逆' },
+  { mode: 'mixed', title: 'Mixed', description: 'Random mode per question', glyph: '混' },
+]
+
+/** Radical quizzes are meaning-only for now (Etap 2). */
+const RADICAL_MODES: { mode: QuizMode; title: string; description: string; glyph: string }[] = [
+  { mode: 'meaning', title: 'Meaning', description: 'Pick the keyword of a radical', glyph: '意' },
+]
+
+/** Vocab quizzes come in the three card directions plus mixed (Etap 4). */
+const VOCAB_MODES: { mode: QuizMode; title: string; description: string; glyph: string }[] = [
+  { mode: 'meaning', title: 'Meaning', description: 'Pick the meaning of a word', glyph: '意' },
+  { mode: 'reading', title: 'Reading', description: 'Pick the reading of a word', glyph: '読' },
+  { mode: 'reverse', title: 'Reverse', description: 'Pick the word for a meaning', glyph: '逆' },
+  { mode: 'mixed', title: 'Mixed', description: 'Random mode per question', glyph: '混' },
+]
+
 interface QuizSetupProps {
+  scope: SessionType
   config: QuizConfig
   counts: QuizSourceCounts
   maxCount: number
@@ -25,10 +56,12 @@ interface QuizSetupProps {
   clozeEligibleCount: number
   canStart: boolean
   onChange: (patch: Partial<QuizConfig>) => void
+  onScopeChange: (scope: SessionType) => void
   onStart: (mode: QuizMode) => void
 }
 
 export function QuizSetup({
+  scope,
   config,
   counts,
   maxCount,
@@ -36,11 +69,20 @@ export function QuizSetup({
   clozeEligibleCount,
   canStart,
   onChange,
+  onScopeChange,
   onStart,
 }: QuizSetupProps) {
   const count = Math.min(config.count, Math.max(maxCount, 1))
   const extraNew = Math.min(config.extraNew, maxExtraNew)
   const setSize = Math.min(config.count, maxCount) + extraNew
+  const modes =
+    scope === 'radical'
+      ? RADICAL_MODES
+      : scope === 'vocab'
+        ? VOCAB_MODES
+        : scope === 'mixed'
+          ? MIXED_MODES
+          : MODES
 
   const toggleSource = (source: QuizSource) => {
     const has = config.sources.includes(source)
@@ -72,6 +114,27 @@ export function QuizSetup({
       <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <div className="space-y-2">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Deck
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {SCOPES.map(({ value, label }) => (
+              <Chip
+                key={value}
+                label={label}
+                pressed={scope === value}
+                onClick={() => onScopeChange(value)}
+              />
+            ))}
+          </div>
+          {scope === 'mixed' && (
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              All card types together — radicals answer in meaning mode.
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Sources
           </h3>
           <div className="flex flex-wrap gap-2">
@@ -92,6 +155,11 @@ export function QuizSetup({
             Grade
           </h3>
           <div className="flex flex-wrap gap-2">
+            <Chip
+              label="G0"
+              pressed={config.grades.includes(0)}
+              onClick={() => toggleGrade(0)}
+            />
             {GRADES.map((grade) => (
               <Chip
                 key={grade}
@@ -101,6 +169,18 @@ export function QuizSetup({
               />
             ))}
           </div>
+          {/* Filters stay visible in every scope: grade narrows only the kanji
+              portion of a mixed pool, due/problematic apply to all types. */}
+          {scope !== 'kanji' && (
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              Applies to the kanji portion of this pool.
+            </p>
+          )}
+          {scope === 'kanji' && !config.grades.includes(0) && (
+            <p className="text-xs text-slate-400 dark:text-slate-500">
+              G0 covers the extra kanji that entered the deck through the top-2000 vocabulary.
+            </p>
+          )}
         </div>
 
         <div className="flex gap-2">
@@ -124,14 +204,16 @@ export function QuizSetup({
           max={Math.max(maxCount, 1)}
           onChange={(value) => onChange({ count: value })}
         />
-        <Stepper
-          label="+ New kanji"
-          hint={`${maxExtraNew} available`}
-          value={extraNew}
-          min={0}
-          max={maxExtraNew}
-          onChange={(value) => onChange({ extraNew: value })}
-        />
+        {scope === 'kanji' && (
+          <Stepper
+            label="+ New kanji"
+            hint={`${maxExtraNew} available`}
+            value={extraNew}
+            min={0}
+            max={maxExtraNew}
+            onChange={(value) => onChange({ extraNew: value })}
+          />
+        )}
 
         <p className="text-center text-sm text-slate-600 dark:text-slate-300">
           Set:{' '}
@@ -142,13 +224,18 @@ export function QuizSetup({
 
       {!canStart && (
         <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-center text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-          No kanji matches these sources and filters. Enable more sources, relax the filters, or
-          add new kanji with “+ New kanji”.
+          {scope === 'radical'
+            ? 'No radicals match these sources. Enable more sources — quizable radicals appear as you study them.'
+            : scope === 'vocab'
+              ? 'No words match these sources. Enable more sources — quizable words appear as you study their kanji.'
+              : scope === 'kanji'
+                ? 'No kanji matches these sources and filters. Enable more sources, relax the filters, or add new kanji with “+ New kanji”.'
+                : 'No cards match these sources yet. Enable more sources — quizable cards appear as you study.'}
         </p>
       )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {MODES.map(({ mode, title, description, glyph }) => {
+        {modes.map(({ mode, title, description, glyph }) => {
           const disabled = !canStart || (mode === 'cloze' && clozeEligibleCount === 0)
           return (
             <button

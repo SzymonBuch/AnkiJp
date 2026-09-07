@@ -1,4 +1,8 @@
 import type { QuestionMode, QuizQuestion } from '../lib/quiz'
+import { jpdbKanjiUrl, jpdbVocabSearchUrl } from '../lib/externalLinks'
+import { Furigana } from './Furigana'
+import { JpdbLink } from './JpdbLink'
+import { TypeBadge } from './TypeBadge'
 
 interface QuizQuestionViewProps {
   question: QuizQuestion
@@ -16,6 +20,25 @@ const INSTRUCTION: Record<QuestionMode, string> = {
   cloze: 'Choose the fitting kanji',
 }
 
+const VOCAB_INSTRUCTION: Record<'meaning' | 'reading' | 'reverse', string> = {
+  reading: 'Choose the reading',
+  meaning: 'Choose the meaning',
+  reverse: 'Choose the word',
+}
+
+function instructionFor(question: QuizQuestion): string {
+  if (question.kind === 'vocab') return VOCAB_INSTRUCTION[question.mode]
+  return INSTRUCTION[question.mode]
+}
+
+/** Glyph prompts stay huge; word and text prompts scale to stay legible. */
+function promptClasses(question: QuizQuestion): string {
+  const base = 'select-none font-medium leading-snug [overflow-wrap:anywhere]'
+  if (question.kind === 'vocab') return `${base} text-4xl sm:text-5xl`
+  if (question.mode === 'reverse') return `${base} text-6xl`
+  return 'select-none text-[9rem] font-semibold leading-none sm:text-[11rem]'
+}
+
 export function QuizQuestionView({
   question,
   index,
@@ -25,7 +48,6 @@ export function QuizQuestionView({
   onNext,
 }: QuizQuestionViewProps) {
   const answered = selection !== null
-  const isReverse = question.mode === 'reverse'
   const isCloze = question.mode === 'cloze'
 
   return (
@@ -35,10 +57,14 @@ export function QuizQuestionView({
           Question <span className="font-semibold text-slate-900 dark:text-slate-100">{index + 1}</span> of {total}
         </span>
         <span className="flex items-center gap-2">
-          <span className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs font-semibold text-slate-500 dark:border-slate-600 dark:text-slate-400">
-            G{question.grade}
-          </span>
-          <span className="text-slate-400 dark:text-slate-500">{INSTRUCTION[question.mode]}</span>
+          {/* Identical fronts (`r:一` vs `k:一`) are disambiguated by type. */}
+          <TypeBadge type={question.kind === 'radical' ? 'radical' : question.kind === 'vocab' ? 'vocab' : 'kanji'} />
+          {question.kind === 'kanji' && (
+            <span className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs font-semibold text-slate-500 dark:border-slate-600 dark:text-slate-400">
+              G{question.grade}
+            </span>
+          )}
+          <span className="text-slate-400 dark:text-slate-500">{instructionFor(question)}</span>
         </span>
       </div>
 
@@ -48,13 +74,15 @@ export function QuizQuestionView({
         </div>
       ) : (
         <div className="flex flex-col items-center gap-2 py-6">
-          <div
-            className={`select-none leading-none ${
-              isReverse ? 'text-6xl font-medium' : 'text-[9rem] font-semibold sm:text-[11rem]'
-            }`}
-          >
-            {question.prompt}
-          </div>
+          {question.kind === 'vocab' && question.furiganaHtml && !question.hideFurigana ? (
+            // Word prompts render their bundled furigana — except in reading
+            // mode, where it would reveal the answer (hideFurigana).
+            <div className="select-none text-5xl font-semibold leading-snug sm:text-6xl">
+              <Furigana html={question.furiganaHtml} />
+            </div>
+          ) : (
+            <div className={promptClasses(question)}>{question.prompt}</div>
+          )}
         </div>
       )}
 
@@ -74,7 +102,7 @@ export function QuizQuestionView({
               type="button"
               disabled={answered}
               onClick={() => onSelect(option)}
-              className={`rounded-xl border-2 px-4 py-4 text-center text-lg font-semibold shadow-sm transition disabled:cursor-default ${classes}`}
+              className={`flex min-h-14 items-center justify-center rounded-xl border-2 px-4 py-3 text-center text-lg font-semibold shadow-sm transition [overflow-wrap:anywhere] disabled:cursor-default ${classes}`}
             >
               {option}
             </button>
@@ -93,11 +121,29 @@ export function QuizQuestionView({
               ? 'Correct!'
               : `Not quite — the answer is ${question.correct}`}
           </p>
-          {isCloze && question.sentenceEn && (
+          {question.kind === 'vocab' && (
+            // Post-answer reinforcement: re-show the word together with its
+            // reading and meaning, whatever the question mode asked for.
+            <div className="flex flex-col items-center gap-0.5 text-center">
+              <span className="text-2xl font-semibold leading-snug">
+                {question.furiganaHtml ? <Furigana html={question.furiganaHtml} /> : question.vocabId}
+              </span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">
+                {question.reading} · {question.meaning}
+              </span>
+            </div>
+          )}
+          {question.kind === 'kanji' && isCloze && question.sentenceEn && (
             <p className="max-w-sm text-center text-sm text-slate-500 dark:text-slate-400">
               {question.sentenceEn}
             </p>
           )}
+          <JpdbLink
+            href={question.kind === 'vocab'
+              ? jpdbVocabSearchUrl(question.vocabId)
+              : jpdbKanjiUrl(question.kind === 'radical' ? question.glyph : question.kanji)}
+            ariaLabel={`Open ${question.kind === 'vocab' ? question.vocabId : question.kind === 'radical' ? question.glyph : question.kanji} in jpdb`}
+          />
           <button
             type="button"
             onClick={onNext}

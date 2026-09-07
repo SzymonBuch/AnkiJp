@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { answerCard, getSessionQueue, markIgnored } from './db'
-import type { Rating, SrsCard } from './srs'
+import type { SessionType } from './mixed'
+import { typeOf, type Rating, type SrsCard } from './srs'
 
 export type SessionKind = 'study' | 'review'
 export type SessionStatus = 'loading' | 'ready' | 'done' | 'empty'
@@ -19,16 +20,21 @@ export interface StudySession {
   revealed: boolean
   reveal: () => void
   rate: (rating: Rating) => void
+  /** Ban the current card; radicals have no Ignore (decision #10). */
+  canIgnore: boolean
   ignore: () => void
   finish: () => void
 }
 
 /**
- * Shared state for a Study (new cards) or Review (due cards) session.
- * The queue is rebuilt from the DB after every answer, so learning/relearning
- * steps that have elapsed are pulled back into the same session.
+ * Shared state for a Study (new cards) or Review (due cards) session over one
+ * content type or over all types mixed together. The queue is rebuilt from
+ * the DB after every answer, so learning/relearning steps that have elapsed
+ * are pulled back into the same session, gating re-evaluates mid-session
+ * (studied components unlock kanji on the next rebuild) and — in a mixed
+ * study session — freshly unlocked cards float to the front.
  */
-export function useStudySession(kind: SessionKind): StudySession {
+export function useStudySession(kind: SessionKind, type: SessionType = 'kanji'): StudySession {
   const [status, setStatus] = useState<SessionStatus>('loading')
   const [cards, setCards] = useState<SrsCard[]>([])
   const [progress, setProgress] = useState<SessionProgress>({
@@ -40,12 +46,12 @@ export function useStudySession(kind: SessionKind): StudySession {
   const busy = useRef(false)
 
   const loadQueue = useCallback(async (): Promise<SrsCard[]> => {
-    const queue = await getSessionQueue()
+    const queue = await getSessionQueue(type)
     if (kind === 'study') {
       return [...queue.learning.filter((c) => c.state === 'learning'), ...queue.fresh]
     }
     return [...queue.learning.filter((c) => c.state === 'relearning'), ...queue.review]
-  }, [kind])
+  }, [kind, type])
 
   useEffect(() => {
     let cancelled = false
@@ -77,7 +83,7 @@ export function useStudySession(kind: SessionKind): StudySession {
           newCards: p.newCards + (current.state === 'new' ? 1 : 0),
           reviewCards: p.reviewCards + (current.state === 'review' ? 1 : 0),
         }))
-        await answerCard(current.kanji, rating)
+        await answerCard(current.id, rating)
         const next = await loadQueue()
         setRevealed(false)
         if (next.length === 0) setStatus('done')
@@ -91,16 +97,17 @@ export function useStudySession(kind: SessionKind): StudySession {
 
   /**
    * Ban the current card ("Ignore") and move on. Not an answer: no log entry
-   * and no progress change — the card just leaves the queue.
+   * and no progress change — the card just leaves the queue. Radicals are
+   * never ignorable (decision #10); `canIgnore` keeps the UI in sync.
    */
   const ignore = useCallback(
     async () => {
       if (busy.current || status !== 'ready') return
       const current = cards[0]
-      if (!current) return
+      if (!current || typeOf(current.id) === 'radical') return
       busy.current = true
       try {
-        await markIgnored(current.kanji, true)
+        await markIgnored(current.id, true)
         const next = await loadQueue()
         setRevealed(false)
         if (next.length === 0) setStatus('done')
@@ -112,14 +119,17 @@ export function useStudySession(kind: SessionKind): StudySession {
     [cards, loadQueue, status],
   )
 
+  const current = cards[0] ?? null
+
   return {
     status,
-    current: cards[0] ?? null,
+    current,
     remaining: cards.length,
     progress,
     revealed,
     reveal,
     rate,
+    canIgnore: current !== null && typeOf(current.id) !== 'radical',
     ignore,
     finish,
   }

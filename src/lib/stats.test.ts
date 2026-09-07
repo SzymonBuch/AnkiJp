@@ -6,7 +6,7 @@ const NOW = new Date('2026-08-20T12:00:00Z').getTime()
 
 function log(overrides: Partial<ReviewLog>): ReviewLog {
   return {
-    kanji: '一',
+    cardId: 'k:一',
     rating: 'good',
     prevState: 'new',
     newState: 'review',
@@ -71,6 +71,11 @@ describe('accuracy and retention', () => {
       currentStreak: 0,
       longestStreak: 0,
       daily: [],
+      byType: {
+        kanji: { answers: 0, newLearned: 0, reviewsDone: 0, accuracy: 0 },
+        radical: { answers: 0, newLearned: 0, reviewsDone: 0, accuracy: 0 },
+        vocab: { answers: 0, newLearned: 0, reviewsDone: 0, accuracy: 0 },
+      },
     })
   })
 
@@ -78,6 +83,29 @@ describe('accuracy and retention', () => {
     const stats = computeStats([log({ rating: 'hard', prevState: 'review' })], NOW)
     expect(stats.retention).toBe(100)
     expect(stats.accuracy).toBe(100)
+  })
+})
+
+describe('per-type breakdown (Etap 6)', () => {
+  it('splits the counters by content type via the id prefix', () => {
+    const stats = computeStats(
+      [
+        log({ cardId: 'k:一', prevState: 'new' }),
+        log({ cardId: 'k:二', prevState: 'review', rating: 'again' }),
+        log({ cardId: 'r:口', prevState: 'new', rating: 'easy' }),
+        log({ cardId: 'w:たべる', prevState: 'new' }),
+        log({ cardId: 'w:のむ', prevState: 'review' }),
+      ],
+      NOW,
+    )
+    expect(stats.byType.kanji).toEqual({ answers: 2, newLearned: 1, reviewsDone: 1, accuracy: 50 })
+    expect(stats.byType.radical).toEqual({ answers: 1, newLearned: 1, reviewsDone: 0, accuracy: 100 })
+    expect(stats.byType.vocab).toEqual({ answers: 2, newLearned: 1, reviewsDone: 1, accuracy: 100 })
+    // The breakdown adds up to the headline numbers.
+    expect(stats.totalAnswers).toBe(5)
+    expect(stats.newLearned).toBe(3)
+    expect(stats.reviewsDone).toBe(2)
+    expect(stats.accuracy).toBe(80)
   })
 })
 

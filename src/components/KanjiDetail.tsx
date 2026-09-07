@@ -1,19 +1,24 @@
 import type { ReactNode } from 'react'
 import type { Settings } from '../lib/db'
 import type { KanjiEntry } from '../lib/kanji'
+import { hasRadical } from '../lib/radicals'
 import type { SrsCard } from '../lib/srs'
+import { jpdbKanjiUrl } from '../lib/externalLinks'
 import { Furigana } from './Furigana'
+import { JpdbLink } from './JpdbLink'
 
 export interface KanjiDetailProps {
   entry: KanjiEntry
   card: SrsCard
   settings: Settings
+  /** `undefined` hides the whole drawing section (session overlays are read-only). */
   drawing?: string | null
   onToggleKnown: (known: boolean) => void
   onToggleIgnored: (ignored: boolean) => void
-  onDraw: () => void
-  onDeleteDrawing: () => void
+  onDraw?: () => void
+  onDeleteDrawing?: () => void
   onClose: () => void
+  onSelectRadical?: (glyph: string) => void
 }
 
 const STATE_LABEL: Record<SrsCard['state'], string> = {
@@ -24,7 +29,7 @@ const STATE_LABEL: Record<SrsCard['state'], string> = {
 }
 
 /** Full card details: every meaning and every example sentence plus SRS state. */
-export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onToggleIgnored, onDraw, onDeleteDrawing, onClose }: KanjiDetailProps) {
+export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onToggleIgnored, onDraw, onDeleteDrawing, onClose, onSelectRadical }: KanjiDetailProps) {
   const meanings = entry.meanings.length > 0 && entry.meanings[0] !== entry.meaning
     ? entry.meanings
     : [entry.meaning]
@@ -76,6 +81,9 @@ export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onT
               <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                 {[entry.on.join(', '), entry.kun.join(', ')].filter(Boolean).join(' ・ ')}
               </div>
+              <div className="mt-3">
+                <JpdbLink href={jpdbKanjiUrl(entry.kanji)} ariaLabel={`Open ${entry.kanji} in jpdb`} />
+              </div>
               <div className="mt-1 text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Grade {entry.grade}
               </div>
@@ -110,13 +118,25 @@ export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onT
             </h3>
             <div className="flex flex-wrap gap-2">
               {entry.radicals.map((radical, index) => (
-                <span
+                hasRadical(radical.glyph) && onSelectRadical ? (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => onSelectRadical(radical.glyph)}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-700 transition hover:border-slate-400 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500"
+                  >
+                    <span className="mr-1.5 text-lg leading-none">{radical.glyph}</span>
+                    {radical.keyword}
+                  </button>
+                ) : (
+                  <span
                   key={index}
                   className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
                 >
                   <span className="mr-1.5 text-lg leading-none">{radical.glyph}</span>
                   {radical.keyword}
-                </span>
+                  </span>
+                )
               ))}
             </div>
           </section>
@@ -159,38 +179,40 @@ export function KanjiDetail({ entry, card, settings, drawing, onToggleKnown, onT
             )}
           </section>
 
-          <section className="mt-5 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
-            <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              My drawing
-            </h3>
-            {drawing ? (
-              <img
-                src={drawing}
-                alt={`Hand-drawn mnemonic for ${entry.kanji}`}
-                className="h-32 w-32 rounded-lg border border-slate-200 dark:border-slate-700"
-              />
-            ) : (
-              <p className="italic text-slate-400 dark:text-slate-500">No drawing yet.</p>
-            )}
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={onDraw}
-                className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
-              >
-                {drawing ? 'Edit drawing' : 'Draw'}
-              </button>
-              {drawing && (
+          {drawing !== undefined && (
+            <section className="mt-5 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+              <h3 className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                My drawing
+              </h3>
+              {drawing ? (
+                <img
+                  src={drawing}
+                  alt={`Hand-drawn mnemonic for ${entry.kanji}`}
+                  className="h-32 w-32 rounded-lg border border-slate-200 dark:border-slate-700"
+                />
+              ) : (
+                <p className="italic text-slate-400 dark:text-slate-500">No drawing yet.</p>
+              )}
+              <div className="mt-3 flex gap-2">
                 <button
                   type="button"
-                  onClick={onDeleteDrawing}
-                  className="min-h-11 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700 transition active:scale-95 dark:border-red-900 dark:bg-red-950/50 dark:text-red-400"
+                  onClick={onDraw}
+                  className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-600 transition active:scale-95 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
                 >
-                  Delete
+                  {drawing ? 'Edit drawing' : 'Draw'}
                 </button>
-              )}
-            </div>
-          </section>
+                {drawing && onDeleteDrawing && (
+                  <button
+                    type="button"
+                    onClick={onDeleteDrawing}
+                    className="min-h-11 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-medium text-red-700 transition active:scale-95 dark:border-red-900 dark:bg-red-950/50 dark:text-red-400"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </div>

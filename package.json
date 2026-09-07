@@ -11,11 +11,15 @@
     "preview": "vite preview",
     "data:kyoiku": "node scripts/fetch-kyoiku.mjs",
     "data:jpdb": "node scripts/fetch-jpdb.mjs",
+    "data:vocab": "node scripts/select-vocab.mjs",
+    "data:extend": "node scripts/extend-deck.mjs",
     "data:tatoeba": "node scripts/fetch-tatoeba.mjs",
     "data:mnemonics": "node scripts/prepare-mnemonics.mjs",
     "data:build": "node scripts/build-data.mjs",
+    "data:radicals": "node scripts/build-radicals.mjs",
+    "data:vocabjson": "node scripts/build-vocab.mjs",
     "data:verify": "node scripts/verify.mjs",
-    "data:pipeline": "npm run data:kyoiku && npm run data:jpdb && npm run data:tatoeba && npm run data:mnemonics && npm run data:build && npm run data:verify"
+    "data:pipeline": "npm run data:kyoiku && npm run data:jpdb && npm run data:vocab && npm run data:extend && npm run data:tatoeba && npm run data:mnemonics && npm run data:build && npm run data:radicals && npm run data:vocabjson && npm run data:verify"
   },
   "dependencies": {
     "idb": "8.0.3",
@@ -29,6 +33,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "6.1.0",
     "fake-indexeddb": "^6.2.5",
+    "fflate": "^0.8.3",
     "kuromoji": "^0.1.2",
     "node-html-parser": "9.0.1",
     "oxlint": "^1.75.0",

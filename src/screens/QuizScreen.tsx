@@ -3,9 +3,22 @@ import { QuizQuestionView } from '../components/QuizQuestionView'
 import { QuizSetup } from '../components/QuizSetup'
 import { QuizSummary } from '../components/QuizSummary'
 import { useQuizSession } from '../lib/useQuizSession'
+import type { SessionType } from '../lib/mixed'
 
-export function QuizScreen({ onExit }: { onExit: () => void }) {
-  const quiz = useQuizSession()
+interface QuizScreenProps {
+  type?: SessionType
+  onExit: () => void
+}
+
+const TITLES: Record<SessionType, string> = {
+  mixed: 'Quiz',
+  kanji: 'Kanji quiz',
+  radical: 'Radical quiz',
+  vocab: 'Word quiz',
+}
+
+export function QuizScreen({ type = 'mixed', onExit }: QuizScreenProps) {
+  const quiz = useQuizSession(type)
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -27,7 +40,7 @@ export function QuizScreen({ onExit }: { onExit: () => void }) {
     <div className="flex min-h-svh flex-col">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-slate-100/95 p-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
         <div className="mx-auto flex max-w-xl items-center justify-between">
-          <h1 className="text-lg font-semibold">Quiz</h1>
+            <h1 className="text-lg font-semibold">{TITLES[quiz.type]}</h1>
           <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-300">
             <button
               type="button"
@@ -45,6 +58,7 @@ export function QuizScreen({ onExit }: { onExit: () => void }) {
         {quiz.status === 'empty' && <EmptyState onExit={onExit} />}
         {quiz.status === 'setup' && (
           <QuizSetup
+            scope={quiz.type}
             config={quiz.config}
             counts={quiz.counts}
             maxCount={quiz.maxCount}
@@ -52,6 +66,7 @@ export function QuizScreen({ onExit }: { onExit: () => void }) {
             clozeEligibleCount={quiz.clozeEligibleCount}
             canStart={quiz.canStart}
             onChange={quiz.updateConfig}
+            onScopeChange={quiz.changeScope}
             onStart={quiz.start}
           />
         )}
@@ -85,8 +100,8 @@ function EmptyState({ onExit }: { onExit: () => void }) {
     <div className="flex flex-col items-center gap-6 py-16 text-center">
       <h2 className="text-2xl font-semibold">Nothing to quiz yet</h2>
       <p className="max-w-sm text-slate-600 dark:text-slate-300">
-        Your deck is empty of quizable kanji. Study a few first — quizzes can draw from kanji
-        you know, ones in progress, or even brand-new cards.
+        Your deck is empty of quizable cards. Study a few first — quizzes can draw from cards you
+        know, ones in progress, or even brand-new ones.
       </p>
       <button
         type="button"

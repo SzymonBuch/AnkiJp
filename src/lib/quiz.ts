@@ -1,5 +1,7 @@
 import { getKanji, type KanjiEntry } from './kanji'
-import { DAY_MS, STARTING_EASE, type SrsCard } from './srs'
+import { getRadical, type RadicalEntry } from './radicals'
+import { getVocab, type VocabEntry } from './vocab'
+import { bareId, DAY_MS, STARTING_EASE, typeOf, type ContentType, type SrsCard } from './srs'
 import type { QuizPools } from './db'
 
 export type QuizSource = 'known' | 'progress' | 'new'
@@ -11,6 +13,7 @@ export type QuestionMode = Exclude<QuizMode, 'mixed'>
 
 export interface QuizConfig {
   sources: QuizSource[]
+  /** School grades 1–6; meaningful only for kanji quizzes. */
   grades: number[]
   count: number
   extraNew: number
@@ -27,26 +30,53 @@ export const DEFAULT_QUIZ_CONFIG: QuizConfig = {
   problematicOnly: false,
 }
 
-export interface QuizQuestion {
+interface QuestionBase {
   index: number
   mode: QuestionMode
-  /** The kanji the question is about. */
-  kanji: string
-  /** School grade of the kanji (G1–G6 badge). */
-  grade: number
-  /** Text shown as the prompt: a kanji (reading/meaning), a reading (reverse) or a sentence with ◯ (cloze). */
+  /** Text shown as the prompt. */
   prompt: string
-  /** The primary reading the question is built around. */
-  reading: string
   /** The correct answer text. */
   correct: string
   /** 4 shuffled options; exactly one equals `correct`. */
   options: string[]
+  /** Reading-mode vocab prompts hide their furigana — it would show the answer. */
+  hideFurigana?: boolean
+}
+
+export interface KanjiQuestion extends QuestionBase {
+  kind: 'kanji'
+  /** The kanji the question is about. */
+  kanji: string
+  /** School grade of the kanji (G1–G6 badge). */
+  grade: number
+  /** The primary reading the question is built around. */
+  reading: string
   /** Cloze only: the example sentence with the kanji hidden… */
   sentenceJp?: string
   /** …and its English translation, revealed after answering. */
   sentenceEn?: string
 }
+
+export interface RadicalQuestion extends QuestionBase {
+  kind: 'radical'
+  /** Prompt is the bare glyph; identical to some kanji fronts — TypeBadge disambiguates. */
+  glyph: string
+  keyword: string
+}
+
+export interface VocabQuestion extends QuestionBase {
+  kind: 'vocab'
+  /** Vocab never asks cloze questions. */
+  mode: Exclude<QuestionMode, 'cloze'>
+  /** The word form the question is about (its bare card id). */
+  vocabId: string
+  reading: string
+  meaning: string
+  /** Furigana HTML for rendering the prompt; set only when showing it is safe. */
+  furiganaHtml?: string
+}
+
+export type QuizQuestion = KanjiQuestion | RadicalQuestion | VocabQuestion
 
 export interface SelectQuizOpts {
   now?: number
@@ -95,7 +125,7 @@ export function selectQuizTargets(
   const sourceCards = config.sources.flatMap((source) => pools[source] ?? [])
   const candidates = sourceCards
     .filter((card) => passesFilters(card, config, now))
-    .map((card) => getKanji(card.kanji))
+    .map((card) => getKanji(bareId(card.id)))
     .filter((entry) => grades.has(entry.grade))
     .filter((entry) => opts.predicate?.(entry) ?? true)
   for (const entry of sampleKanji(candidates, config.count, rng)) {
@@ -107,7 +137,7 @@ export function selectQuizTargets(
 
   if (config.extraNew > 0) {
     const extraCandidates = pools.new
-      .map((card) => getKanji(card.kanji))
+      .map((card) => getKanji(bareId(card.id)))
       .filter((entry) => grades.has(entry.grade) && !selected.has(entry.kanji))
     for (const entry of sampleKanji(extraCandidates, config.extraNew, rng)) {
       if (!selected.has(entry.kanji)) {
@@ -125,22 +155,270 @@ export function sampleKanji<T>(arr: T[], count: number, rng: () => number): T[] 
 }
 
 /**
- * Build a complete, isolated quiz from the given targets. Pure function — never
- * touches the DB, the SRS state or logs. Question targets are only the given
- * entries; distractors may come from any kanji (they are simply wrong answers).
- * `mixed` picks a concrete mode per question, uniformly among the modes
- * available for that entry (cloze included when the entry has sentences).
+ * Build a complete, isolated kanji quiz from the given targets. Pure function —
+ * never touches the DB, the SRS state or logs. Question targets are only the
+ * given entries; distractors may come from any kanji (they are simply wrong
+ * answers). `mixed` picks a concrete mode per question, uniformly among the
+ * modes available for that entry (cloze included when the entry has sentences).
  */
 export function buildQuiz(
   mode: QuizMode,
   poolEntries: KanjiEntry[],
   allEntries: KanjiEntry[],
   rng: () => number = Math.random,
-): QuizQuestion[] {
+): KanjiQuestion[] {
   return poolEntries.map((entry, index) => {
     const questionMode = mode === 'mixed' ? pickMode(entry, rng) : mode
     return buildQuestion(questionMode, entry, index, allEntries, rng)
   })
+}
+
+/**
+ * Radical quiz (Etap 2): meaning mode — glyph → keyword — with distractors
+ * drawn from the full radical pool. Reverse stays unbuilt until the keywords
+ * prove unique enough on real cards (0 duplicates today, but long strings).
+ */
+export function buildRadicalQuiz(
+  targets: RadicalEntry[],
+  all: RadicalEntry[],
+  rng: () => number = Math.random,
+): RadicalQuestion[] {
+  return targets.map((entry, index) => ({
+    kind: 'radical',
+    index,
+    mode: 'meaning' as const,
+    prompt: entry.glyph,
+    glyph: entry.glyph,
+    keyword: entry.keyword,
+    correct: entry.keyword,
+    options: buildOptions(entry.keyword, candidateKeywords(entry, all), 3, rng),
+  }))
+}
+
+function candidateKeywords(target: RadicalEntry, all: RadicalEntry[]): string[] {
+  const seen = new Set([target.keyword])
+  const out: string[] = []
+  for (const { keyword } of all) {
+    if (!seen.has(keyword)) {
+      seen.add(keyword)
+      out.push(keyword)
+    }
+  }
+  return out
+}
+
+/** Sample radical quiz targets from snapshotted pools; same source semantics as kanji. */
+export function selectRadicalTargets(
+  config: Pick<QuizConfig, 'sources' | 'count' | 'dueOnly' | 'problematicOnly'>,
+  pools: QuizPools,
+  now: number,
+  rng: () => number = Math.random,
+): RadicalEntry[] {
+  const seen = new Set<string>()
+  const candidates: RadicalEntry[] = []
+  for (const card of config.sources.flatMap((source) => pools[source] ?? [])) {
+    if (!passesFilters(card, config, now)) continue
+    const glyph = bareId(card.id)
+    if (seen.has(glyph)) continue
+    seen.add(glyph)
+    candidates.push(getRadical(glyph))
+  }
+  return sampleKanji(candidates, config.count, rng)
+}
+
+/**
+ * Vocab quiz (Etap 4): meaning / reading / reverse over the word pool.
+ * `mixed` resolves to one of the three per question; cloze is kanji-only.
+ */
+const VOCAB_MODES = ['meaning', 'reading', 'reverse'] as const
+
+export function buildVocabQuiz(
+  mode: QuizMode,
+  targets: VocabEntry[],
+  all: VocabEntry[],
+  rng: () => number = Math.random,
+): VocabQuestion[] {
+  if (mode === 'cloze') throw new Error('Cloze mode is kanji-only')
+  return targets.map((entry, index) => {
+    const questionMode =
+      mode === 'mixed' ? VOCAB_MODES[Math.floor(rng() * VOCAB_MODES.length)] : mode
+    return buildVocabQuestion(questionMode, entry, index, all, rng)
+  })
+}
+
+/** How deep into the shape-ranked pool random sampling may reach. */
+const SIMILAR_WINDOW = 24
+
+function buildVocabQuestion(
+  mode: 'meaning' | 'reading' | 'reverse',
+  entry: VocabEntry,
+  index: number,
+  all: VocabEntry[],
+  rng: () => number,
+): VocabQuestion {
+  const question: VocabQuestion = {
+    kind: 'vocab',
+    index,
+    mode,
+    vocabId: entry.id,
+    reading: entry.reading,
+    meaning: entry.meaning,
+    prompt: '',
+    correct: '',
+    options: [],
+  }
+  // Distractors are drawn from the nearest-shape slice of the filtered pool,
+  // so the similarity ranking actually constrains the sample. Strings equal
+  // to the correct answer (same reading/meaning on another word) never qualify.
+  const distractors = (pick: (e: VocabEntry) => string, correct: string): string[] =>
+    [...new Set(vocabCandidates(entry, all).map(pick))]
+      .filter((value) => value && value !== correct)
+      .slice(0, SIMILAR_WINDOW)
+  switch (mode) {
+    case 'meaning': {
+      question.prompt = entry.id
+      question.furiganaHtml = entry.furiganaHtml
+      question.correct = entry.meaning
+      question.options = buildOptions(
+        question.correct,
+        distractors((e) => e.meaning, question.correct),
+        3,
+        rng,
+      )
+      return question
+    }
+    case 'reading': {
+      // Furigana would spell out the answer above the prompt — hide it (#Etap4).
+      question.prompt = entry.id
+      question.hideFurigana = true
+      question.correct = entry.reading
+      question.options = buildOptions(
+        question.correct,
+        distractors((e) => e.reading, question.correct),
+        3,
+        rng,
+      )
+      return question
+    }
+    case 'reverse': {
+      question.prompt = entry.meaning
+      question.correct = entry.id
+      question.options = buildOptions(
+        question.correct,
+        distractors((e) => e.id, question.correct),
+        3,
+        rng,
+      )
+      return question
+    }
+  }
+}
+
+/**
+ * Distractor pool for one vocab target: every other word that shares none of
+ * its glosses (`targetMeanings` pattern extended to all glosses on both sides,
+ * decision #14), nearest by word length and kanji share first. Sorting is
+ * stable, so ties keep their ranking order.
+ */
+function vocabCandidates(target: VocabEntry, all: VocabEntry[]): VocabEntry[] {
+  const targetGlosses = new Set([target.meaning, ...target.meanings])
+  const targetLength = [...target.id].length
+  const shaped: { entry: VocabEntry; score: number }[] = []
+  for (const entry of all) {
+    if (entry.id === target.id) continue
+    const glosses = [entry.meaning, ...entry.meanings]
+    if (glosses.some((gloss) => targetGlosses.has(gloss))) continue
+    const score =
+      Math.abs([...entry.id].length - targetLength) +
+      Math.abs(entry.kanji.length - target.kanji.length)
+    shaped.push({ entry, score })
+  }
+  return shaped.sort((a, b) => a.score - b.score).map(({ entry }) => entry)
+}
+
+/** Sample vocab quiz targets from snapshotted pools; same source semantics as kanji. */
+export function selectVocabTargets(
+  config: Pick<QuizConfig, 'sources' | 'count' | 'dueOnly' | 'problematicOnly'>,
+  pools: QuizPools,
+  now: number,
+  rng: () => number = Math.random,
+): VocabEntry[] {
+  const seen = new Set<string>()
+  const candidates: VocabEntry[] = []
+  for (const card of config.sources.flatMap((source) => pools[source] ?? [])) {
+    if (!passesFilters(card, config, now)) continue
+    const id = bareId(card.id)
+    if (seen.has(id)) continue
+    seen.add(id)
+    candidates.push(getVocab(id))
+  }
+  return sampleKanji(candidates, config.count, rng)
+}
+
+/** Mixed-scope quiz targets grouped per content type (Etap 5). */
+export interface MixedTargets {
+  kanji: KanjiEntry[]
+  radical: RadicalEntry[]
+  vocab: VocabEntry[]
+}
+
+/**
+ * Sample quiz targets from all three content types at once (Etap 5): the
+ * default mixed pool. Filters apply uniformly; the grade filter is
+ * meaningful only for kanji and never drops radicals or words. The sampled
+ * cards are grouped by type afterwards so each builder receives its own
+ * entry kind.
+ */
+export function selectMixedTargets(
+  config: Pick<QuizConfig, 'sources' | 'grades' | 'count' | 'dueOnly' | 'problematicOnly'>,
+  poolsByType: Record<ContentType, QuizPools>,
+  now: number,
+  rng: () => number = Math.random,
+): MixedTargets {
+  const grades = new Set(config.grades)
+  const candidates: SrsCard[] = []
+  for (const type of ['radical', 'kanji', 'vocab'] as const) {
+    const pools = poolsByType[type]
+    for (const card of config.sources.flatMap((source) => pools[source] ?? [])) {
+      if (!passesFilters(card, config, now)) continue
+      if (type === 'kanji' && !grades.has(getKanji(bareId(card.id)).grade)) continue
+      candidates.push(card)
+    }
+  }
+  const targets: MixedTargets = { kanji: [], radical: [], vocab: [] }
+  for (const card of sampleKanji(candidates, config.count, rng)) {
+    switch (typeOf(card.id)) {
+      case 'kanji':
+        targets.kanji.push(getKanji(bareId(card.id)))
+        break
+      case 'radical':
+        targets.radical.push(getRadical(bareId(card.id)))
+        break
+      case 'vocab':
+        targets.vocab.push(getVocab(bareId(card.id)))
+        break
+    }
+  }
+  return targets
+}
+
+/**
+ * Build one quiz from mixed-scope targets (Etap 5): every group runs through
+ * its own builder — radicals always answer in meaning mode (Etap 2), so a
+ * reading/reverse request falls back to meaning for them — and the combined
+ * questions are shuffled into a single interleaved run.
+ */
+export function buildMixedQuiz(
+  mode: Exclude<QuizMode, 'cloze'>,
+  targets: MixedTargets,
+  all: { kanji: KanjiEntry[]; radical: RadicalEntry[]; vocab: VocabEntry[] },
+  rng: () => number = Math.random,
+): QuizQuestion[] {
+  const parts: QuizQuestion[] = []
+  if (targets.radical.length > 0) parts.push(...buildRadicalQuiz(targets.radical, all.radical, rng))
+  if (targets.kanji.length > 0) parts.push(...buildQuiz(mode, targets.kanji, all.kanji, rng))
+  if (targets.vocab.length > 0) parts.push(...buildVocabQuiz(mode, targets.vocab, all.vocab, rng))
+  return shuffle(parts, rng).map((question, index) => ({ ...question, index }))
 }
 
 function availableModes(entry: KanjiEntry): QuestionMode[] {
@@ -160,9 +438,10 @@ function buildQuestion(
   index: number,
   all: KanjiEntry[],
   rng: () => number,
-): QuizQuestion {
+): KanjiQuestion {
   const reading = primaryReading(entry)
-  const question: QuizQuestion = {
+  const question: KanjiQuestion = {
+    kind: 'kanji',
     index,
     mode,
     kanji: entry.kanji,
